@@ -15,12 +15,12 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/", redirect: "/dashboard" },
-    { path: "/dashboard", component: Dashboard },
-    { path: "/login", component: Login },
-    { path: "/logs", component: Logs },
-    { path: "/keys", component: ApiKeys },
-    { path: "/usage", component: Usage },
-    { path: "/admin-login", component: AdminLogin },
+    { path: "/dashboard", component: Dashboard, meta: { title: "本地代理", subtitle: "服务状态、接入端点与可用模型" } },
+    { path: "/login", component: Login, meta: { title: "小米账号", subtitle: "登录后即可使用超级小爱积分额度" } },
+    { path: "/logs", component: Logs, meta: { title: "实时日志", subtitle: "代理请求实时事件流" } },
+    { path: "/keys", component: ApiKeys, meta: { title: "API 密钥", subtitle: "管理 /v1 接口的 Bearer 鉴权" } },
+    { path: "/usage", component: Usage, meta: { title: "用量统计", subtitle: "按模型统计的 Token 消耗" } },
+    { path: "/admin-login", component: AdminLogin, meta: { title: "后台登录", authGate: true } },
   ],
 });
 

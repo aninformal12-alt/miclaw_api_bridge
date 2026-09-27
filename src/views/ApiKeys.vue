@@ -79,71 +79,60 @@ onMounted(load);
 </script>
 
 <template>
-  <p v-if="error" class="notice bad">{{ error }}</p>
+  <p v-if="error" class="notice bad" style="margin-bottom: 16px">{{ error }}</p>
 
-  <section class="panel">
-    <div class="panel-heading">
-      <p class="section-number">01</p>
-      <div>
-        <h2>API Key</h2>
-        <p>用于 /v1 接口的 Bearer 鉴权。开启“强制校验”后，没有有效 Key 的请求会被拒绝。</p>
-      </div>
-    </div>
-
-    <div class="account-row">
-      <span :class="['state-line', required ? 'ok' : 'warn']">
-        强制校验：{{ required ? "已开启" : "已关闭" }}
+  <section class="card">
+    <h2 class="card-title">强制校验</h2>
+    <p class="card-desc">用于 /v1 接口的 Bearer 鉴权。开启后，没有有效 Key 的请求会被拒绝。</p>
+    <div class="switch-row">
+      <span class="switch-text">
+        <strong>API Key required</strong>
+        <small>{{ required ? "已开启：/v1 需要携带有效 Key" : "已关闭：任意（或不带）Key 都能访问 /v1" }}</small>
       </span>
-      <button class="line-action" :disabled="busy" @click="toggleRequired">
-        {{ required ? "关闭强制" : "开启强制" }}
-      </button>
+      <span class="spacer" style="flex: 1"></span>
+      <button
+        class="switch"
+        type="button"
+        role="switch"
+        :aria-checked="required"
+        :disabled="busy"
+        aria-label="强制校验 API Key"
+        @click="toggleRequired"
+      ></button>
     </div>
-    <p v-if="!required" class="notice warn">
-      当前未开启强制校验，任意（或不带）Key 都能访问 /v1，保持向后兼容。
-    </p>
   </section>
 
-  <section class="panel">
-    <div class="panel-heading compact">
-      <p class="section-number">02</p>
-      <div>
-        <h2>新建 Key</h2>
-        <p>密钥明文仅在创建时显示一次，请立即保存。</p>
-      </div>
-    </div>
-    <div class="two-factor-row">
-      <label>
+  <section class="card">
+    <h2 class="card-title">新建 Key</h2>
+    <p class="card-desc">密钥明文仅在创建时显示一次，请立即保存。</p>
+    <div class="inline-form">
+      <label class="field">
         <span>备注名</span>
         <input v-model="newName" placeholder="例如：我的笔记本" />
       </label>
-      <button class="primary-action" :disabled="busy" @click="create">创建</button>
+      <button class="btn btn-primary" :disabled="busy" @click="create">创建</button>
     </div>
 
     <div v-if="createdSecret" class="secret-reveal">
       <span class="label">新密钥（仅此一次可见）</span>
       <div class="secret-row">
         <code>{{ createdSecret }}</code>
-        <button class="line-action" @click="copySecret">{{ copied ? "已复制" : "复制" }}</button>
+        <button class="btn btn-primary btn-sm" @click="copySecret">{{ copied ? "已复制" : "复制" }}</button>
       </div>
     </div>
   </section>
 
-  <section class="panel">
-    <div class="panel-heading compact">
-      <p class="section-number">03</p>
-      <div>
-        <h2>已有 Key</h2>
-        <p>{{ keys.length }} 个</p>
-      </div>
-    </div>
-    <p v-if="!keys.length" class="notice">还没有创建任何 Key。</p>
-    <div v-else class="model-table">
+  <section class="card">
+    <h2 class="card-title">已有 Key</h2>
+    <p class="card-desc">{{ keys.length }} 个</p>
+    <p v-if="!keys.length" class="notice plain">还没有创建任何 Key。</p>
+    <div v-else class="list-group">
       <div v-for="k in keys" :key="k.id" class="key-row">
         <code>{{ k.prefix }}</code>
         <span>{{ k.name || "未命名" }}</span>
         <span class="muted">建于 {{ fmt(k.created_at) }}</span>
         <span class="muted">最近用 {{ fmt(k.last_used) }}</span>
-        <button class="line-action danger" :disabled="busy" @click="remove(k.id)">删除</button>
+        <button class="btn btn-danger btn-sm" :disabled="busy" @click="remove(k.id)">删除</button>
       </div>
     </div>
   </section>

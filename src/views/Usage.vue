@@ -11,14 +11,14 @@ const error = ref("");
 const loading = ref(false);
 
 const palette = [
-  "#e23744",
-  "#2e7d32",
-  "#1565c0",
-  "#f9a825",
-  "#6a1b9a",
-  "#00838f",
-  "#8d6e63",
-  "#c2185b",
+  "#0a84ff",
+  "#30d158",
+  "#ff9f0a",
+  "#bf5af2",
+  "#64d2ff",
+  "#ff375f",
+  "#ac8e68",
+  "#ffd60a",
 ];
 
 // stable model -> color mapping based on model_totals order
@@ -146,26 +146,26 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <p v-if="error" class="notice bad">{{ error }}</p>
+  <p v-if="error" class="notice bad" style="margin-bottom: 16px">{{ error }}</p>
 
-  <section class="panel">
-    <div class="panel-heading">
-      <p class="section-number">01</p>
-      <div>
-        <h2>Token 用量</h2>
-        <p>按模型统计的 token 消耗。柱状图为各时间桶的总量，按模型堆叠。</p>
-      </div>
-    </div>
+  <section class="card">
+    <h2 class="card-title">Token 用量</h2>
+    <p class="card-desc">按模型统计的 token 消耗。柱状图为各时间桶的总量，按模型堆叠。</p>
 
     <div class="seg-tabs">
-      <button
-        v-for="w in WINDOWS"
-        :key="w"
-        :class="['seg-tab', { active: win === w }]"
-        @click="setWindow(w)"
-      >
-        {{ w }}
-      </button>
+      <div class="seg" role="tablist" aria-label="时间窗口">
+        <button
+          v-for="w in WINDOWS"
+          :key="w"
+          type="button"
+          role="tab"
+          :class="{ active: win === w }"
+          :aria-selected="win === w"
+          @click="setWindow(w)"
+        >
+          {{ w }}
+        </button>
+      </div>
       <span class="grand">合计 {{ fmtNum(report?.grand_total ?? 0) }} tokens</span>
     </div>
 
@@ -187,6 +187,7 @@ onBeforeUnmount(() => {
             :width="barW"
             :height="Math.max(s.h, s.value > 0 ? 1 : 0)"
             :fill="s.color"
+            rx="2"
           >
             <title>{{ labelFor(b) }} · {{ s.model }}: {{ s.value }}</title>
           </rect>
@@ -201,8 +202,8 @@ onBeforeUnmount(() => {
           </text>
         </g>
       </svg>
-      <p v-else-if="report" class="notice" style="margin-left: 0;"  >该时间段内还没有用量记录。</p>
-      <p v-else class="notice" style="margin-left: 0;">加载中…</p>
+      <p v-else-if="report" class="notice plain">该时间段内还没有用量记录。</p>
+      <p v-else class="notice plain">加载中…</p>
     </div>
 
     <div v-if="models.length" class="legend">
@@ -215,68 +216,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.seg-tabs {
-  display: flex;
-  align-items: center;
-  padding: 0 32px 32px 120px;
-}
-.seg-tab {
-  padding: 0.8rem 1.5rem;
-  border-top: 1px solid var(--ink);
-  border-bottom: 1px solid var(--ink);
-  border-left: 0;
-  border-right: 0;
-  background: transparent;
-  color: var(--ink);
-  cursor: pointer;
-  font: inherit;
-  font-weight: 700;
-}
-.seg-tab:first-of-type {
-  border-left: 1px solid var(--ink);
-}
-.seg-tab:last-of-type {
-  border-right: 1px solid var(--ink);
-}
-.seg-tab.active {
-  background: var(--ink);
-  color: var(--bg);
-}
-.seg-tabs .grand {
-  margin-left: auto;
-  opacity: 0.7;
-  font-size: 0.9em;
-}
-.chart-wrap {
-  width: 100%;
-  padding: 0 32px 32px 120px;
-}
 .bars {
   display: block;
   width: 100%;
-  height: 184px;
+  height: 190px;
 }
 .axis-label {
   font-size: 9px;
-  fill: currentColor;
-  opacity: 0.55;
-}
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 1.1rem;
-  padding: 0 32px 32px 120px;
-  font-size: 0.85em;
-}
-.legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.legend-item i {
-  width: 11px;
-  height: 11px;
-  border-radius: 2px;
-  display: inline-block;
+  fill: var(--muted);
 }
 </style>

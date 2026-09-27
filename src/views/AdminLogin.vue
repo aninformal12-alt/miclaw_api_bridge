@@ -61,19 +61,16 @@ onMounted(load);
 </script>
 
 <template>
-  <section class="login-grid" v-if="ready">
-    <div class="panel login-form">
-      <div class="panel-heading">
-        <p class="section-number">00</p>
-        <div>
-          <h2>{{ configured ? "后台登录" : "设置管理密码" }}</h2>
-          <p v-if="configured">输入管理密码以进入后台。</p>
-          <p v-else>首次访问，请为管理后台设置一个密码（至少 6 位）。设置后访问后台都需要登录。</p>
-        </div>
-      </div>
+  <section class="center-page" v-if="ready">
+    <div class="center-card card">
+      <h2 class="card-title">{{ configured ? "后台登录" : "设置管理密码" }}</h2>
+      <p class="card-desc">
+        <template v-if="configured">输入管理密码以进入后台。</template>
+        <template v-else>首次访问，请为管理后台设置一个密码（至少 6 位）。设置后访问后台都需要登录。</template>
+      </p>
 
       <form class="form-stack" @submit.prevent="submit">
-        <label>
+        <label class="field">
           <span>管理密码</span>
           <input
             type="password"
@@ -82,12 +79,12 @@ onMounted(load);
             placeholder="••••••"
           />
         </label>
-        <label v-if="!configured">
+        <label v-if="!configured" class="field">
           <span>确认密码</span>
           <input type="password" v-model="confirm" autocomplete="new-password" />
         </label>
         <button
-          class="primary-action"
+          class="btn btn-primary btn-block"
           type="submit"
           :disabled="busy || !password || (!configured && !confirm)"
         >
@@ -98,22 +95,35 @@ onMounted(load);
         </button>
       </form>
 
-      <p v-if="error" class="notice bad">{{ error }}</p>
-    </div>
+      <div v-if="error" style="margin-top: 16px">
+        <p class="notice bad">{{ error }}</p>
+      </div>
 
-    <aside class="panel auth-steps">
-      <div class="panel-heading compact">
-        <p class="section-number">!</p>
-        <div>
-          <h2>关于鉴权</h2>
-          <p>这是 WebUI 后台的访问密码，与小米账号无关。</p>
+      <div class="auth-steps" style="margin-top: 22px">
+        <div class="list-group">
+          <div class="list-row" style="grid-template-columns: 28px minmax(0, 1fr); min-height: 0; padding: 10px 0">
+            <span class="step-num">1</span>
+            <div>
+              <strong style="font-size: 13px; font-weight: 600">本地优先</strong>
+              <p class="muted" style="margin: 2px 0 0; font-size: 12px">密码以 argon2 哈希保存在本机。</p>
+            </div>
+          </div>
+          <div class="list-row" style="grid-template-columns: 28px minmax(0, 1fr); min-height: 0; padding: 10px 0">
+            <span class="step-num">2</span>
+            <div>
+              <strong style="font-size: 13px; font-weight: 600">会话 Cookie</strong>
+              <p class="muted" style="margin: 2px 0 0; font-size: 12px">登录后通过 HttpOnly Cookie 维持。</p>
+            </div>
+          </div>
+          <div class="list-row" style="grid-template-columns: 28px minmax(0, 1fr); min-height: 0; padding: 10px 0">
+            <span class="step-num">3</span>
+            <div>
+              <strong style="font-size: 13px; font-weight: 600">忘记密码</strong>
+              <p class="muted" style="margin: 2px 0 0; font-size: 12px">删除数据目录下 security.json 可重置。</p>
+            </div>
+          </div>
         </div>
       </div>
-      <ol>
-        <li><span>01</span><strong>本地优先</strong><p>密码以 argon2 哈希保存在本机。</p></li>
-        <li><span>02</span><strong>会话 Cookie</strong><p>登录后通过 HttpOnly Cookie 维持。</p></li>
-        <li><span>03</span><strong>忘记密码</strong><p>删除数据目录下 security.json 可重置。</p></li>
-      </ol>
-    </aside>
+    </div>
   </section>
 </template>

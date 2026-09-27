@@ -105,135 +105,124 @@ onMounted(refreshAll);
 </script>
 
 <template>
-  <p v-if="err" class="notice bad">{{ err }}</p>
+  <p v-if="err" class="notice bad" style="margin-bottom: 16px">{{ err }}</p>
 
-  <section class="status-strip" aria-label="运行状态">
-    <div>
-      <span class="label">Bridge</span>
-      <strong :class="['signal', health.tone]">{{ health.label }}</strong>
+  <section class="status-grid" aria-label="运行状态">
+    <div class="status-card">
+      <span class="label">服务</span>
+      <strong :class="health.tone">{{ health.label }}</strong>
     </div>
-    <div>
-      <span class="label">Account</span>
+    <div class="status-card">
+      <span class="label">账号</span>
       <strong>{{ auth?.authenticated ? auth.nick ?? auth.user_id ?? "已登录" : "未登录" }}</strong>
     </div>
-    <div>
+    <div class="status-card">
       <span class="label">剩余积分</span>
       <strong :class="quotaTone">{{ quotaRemaining }}</strong>
       <small class="status-meta">{{ quotaMeta }}</small>
     </div>
-    <div>
-      <span class="label">Port</span>
+    <div class="status-card">
+      <span class="label">端口</span>
       <strong>{{ proxy?.active_port ?? proxy?.port ?? 8765 }}</strong>
     </div>
-    <div>
-      <span class="label">Models</span>
+    <div class="status-card">
+      <span class="label">模型</span>
       <strong>{{ models.length || "—" }}</strong>
     </div>
   </section>
 
-  <section class="panel proxy-panel">
-    <div class="panel-heading">
-      <p class="section-number">02</p>
-      <div>
-        <h2>本地代理</h2>
-        <p>启动后，任何 OpenAI / Claude 兼容客户端都可以连到本机。</p>
-      </div>
-    </div>
+  <section class="card">
+    <h2 class="card-title">本地代理</h2>
+    <p class="card-desc">启动后，任何 OpenAI / Claude 兼容客户端都可以连到本机。</p>
 
-    <div class="proxy-actions">
-      <button class="primary-action" disabled>服务运行中</button>
-      <div class="port-control">
-        <label for="proxy-port">
-          <span>监听端口</span>
-          <input id="proxy-port" type="number" v-model.number="portInput" min="1024" max="65535" />
-        </label>
-        <button class="line-action" :disabled="busy" @click="applyPort">应用</button>
-      </div>
+    <div class="inline-form" style="margin-bottom: 18px">
+      <span class="pill ok">服务运行中</span>
+      <label class="field" for="proxy-port" style="max-width: 220px">
+        <span>监听端口</span>
+        <input id="proxy-port" type="number" v-model.number="portInput" min="1024" max="65535" />
+      </label>
+      <button class="btn btn-secondary" :disabled="busy" @click="applyPort">应用</button>
     </div>
-    <p v-if="proxy?.restart_required" class="notice warn">
+    <p v-if="proxy?.restart_required" class="notice warn" style="margin-bottom: 14px">
       新端口 {{ proxy.port }} 已保存，重启服务后生效。当前仍在 {{ proxy.active_port }} 端口运行。
     </p>
 
     <div class="endpoint-grid">
       <div>
-        <span class="label">OpenAI</span>
-        <code>{{ proxyBase }}/v1</code>
+        <span class="label">OpenAI Chat</span>
+        <code class="code-chip">{{ proxyBase }}/v1</code>
       </div>
       <div>
         <span class="label">Responses</span>
-        <code>{{ proxyBase }}/v1/responses</code>
+        <code class="code-chip">{{ proxyBase }}/v1/responses</code>
       </div>
       <div>
-        <span class="label">Anthropic</span>
-        <code>{{ proxyBase }}</code>
+        <span class="label">Anthropic Messages</span>
+        <code class="code-chip">{{ proxyBase }}/v1/messages</code>
       </div>
       <div>
         <span class="label">API Key</span>
-        <!-- <RouterLink class="arrow-link" to="/keys">管理密钥</RouterLink> -->
-        <code>
-          <a href="keys#/keys">管理密钥 ></a>
-        </code>
+        <RouterLink class="btn btn-tinted btn-sm" to="/keys">管理密钥</RouterLink>
       </div>
     </div>
   </section>
 
-  <section class="split-panels">
-    <article class="panel">
-      <div class="panel-heading compact">
-        <p class="section-number">03</p>
-        <div>
-          <h2>账号</h2>
-          <p>serviceToken 过期时会自动刷新，也可以手动触发。</p>
-        </div>
-      </div>
-      <div class="account-row">
-        <span :class="['state-line', auth?.authenticated ? 'ok' : 'bad']">
+  <section class="login-grid">
+    <article class="card">
+      <h2 class="card-title">账号</h2>
+      <p class="card-desc">serviceToken 过期时会自动刷新，也可以手动触发。</p>
+      <div class="account-row" style="margin-bottom: 12px">
+        <span :class="['pill', auth?.authenticated ? 'ok' : 'bad']">
           {{ auth?.authenticated ? "已认证" : "未认证" }}
         </span>
-        <button class="line-action" :disabled="busy || !auth?.authenticated" @click="refreshAuth">
+      </div>
+      <div class="account-row">
+        <button class="btn btn-secondary btn-sm" :disabled="busy || !auth?.authenticated" @click="refreshAuth">
           刷新令牌
         </button>
-        <button class="line-action" :disabled="busy || !auth?.authenticated" @click="refreshQuota">
+        <button class="btn btn-secondary btn-sm" :disabled="busy || !auth?.authenticated" @click="refreshQuota">
           刷新额度
         </button>
-        <button class="line-action danger" :disabled="busy || !auth?.authenticated" @click="logout">
-          退出
+        <button class="btn btn-danger btn-sm" :disabled="busy || !auth?.authenticated" @click="logout">
+          退出登录
         </button>
       </div>
-      <RouterLink v-if="!auth?.authenticated" class="arrow-link" to="/login">去登录</RouterLink>
+      <div v-if="!auth?.authenticated" style="margin-top: 14px">
+        <RouterLink class="btn btn-primary" to="/login">去登录</RouterLink>
+      </div>
     </article>
 
-    <article class="panel">
-      <div class="panel-heading compact">
-        <p class="section-number">04</p>
-        <div>
-          <h2>协议</h2>
-          <p>Chat Completions 透传，Messages 和 Responses 做兼容转换。</p>
+    <article class="card">
+      <h2 class="card-title">协议</h2>
+      <p class="card-desc">Chat Completions 透传，Messages 和 Responses 做兼容转换。</p>
+      <div class="list-group">
+        <div class="list-row" style="grid-template-columns: 110px minmax(0, 1fr)">
+          <strong style="font-size: 13.5px">Chat</strong>
+          <code class="code-chip">/v1/chat/completions</code>
+        </div>
+        <div class="list-row" style="grid-template-columns: 110px minmax(0, 1fr)">
+          <strong style="font-size: 13.5px">Responses</strong>
+          <code class="code-chip">/v1/responses</code>
+        </div>
+        <div class="list-row" style="grid-template-columns: 110px minmax(0, 1fr)">
+          <strong style="font-size: 13.5px">Anthropic</strong>
+          <code class="code-chip">/v1/messages</code>
         </div>
       </div>
-      <ul class="protocol-list">
-        <li><span>Chat</span><code>/v1/chat/completions</code></li>
-        <li><span>Responses</span><code>/v1/responses</code></li>
-        <li><span>Anthropic</span><code>/v1/messages</code></li>
-      </ul>
     </article>
   </section>
 
-  <section class="panel">
-    <div class="panel-heading">
-      <p class="section-number">05</p>
-      <div>
-        <h2>可用模型</h2>
-        <p>以下为超级小爱 PC v2 通道中已验证模型的静态列表，并非完整清单。</p>
-        <p>请求中的 <code>model</code> 会直接透传，列表里没有不代表不能调用；是否可用由上游及账号权限决定。</p>
-        <p>能力与长度采用模型官方规格（别名预设另有标注）；实际通道支持情况可能不同。</p>
-      </div>
-    </div>
-    <div class="model-table">
-      <div v-for="(m, index) in models" :key="m.id" class="model-row">
+  <section class="card">
+    <h2 class="card-title">可用模型</h2>
+    <p class="card-desc">
+      以下为超级小爱 PC v2 通道中已验证模型的静态列表，并非完整清单。请求中的
+      <code>model</code> 会直接透传，列表里没有不代表不能调用；是否可用由上游及账号权限决定。能力与长度采用模型官方规格（别名预设另有标注），实际通道支持情况可能不同。
+    </p>
+    <div class="list-group">
+      <div v-for="(m, index) in models" :key="m.id" class="list-row" style="grid-template-columns: 34px minmax(210px, 0.8fr) minmax(0, 1.4fr)">
         <span class="row-index">{{ String(index + 1).padStart(2, "0") }}</span>
-        <code>{{ m.id }}</code>
-        <span>{{ m.family }}</span>
+        <code class="code-chip">{{ m.id }}</code>
+        <span class="muted" style="font-size: 12.5px">{{ m.family }}</span>
       </div>
     </div>
   </section>

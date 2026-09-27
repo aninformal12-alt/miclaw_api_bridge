@@ -97,25 +97,31 @@ function clear() {
 </script>
 
 <template>
-  <section class="panel logs-head">
-    <div class="panel-heading">
-      <p class="section-number">02</p>
-      <div>
-        <h2>实时事件</h2>
-        <p>默认仅记录代理元数据；开启“详细日志”后会额外记录请求正文（含 prompt），点击请求行即可展开。</p>
-      </div>
+  <div class="logs-toolbar">
+    <span class="count">{{ rows.length }} / {{ max }} 条</span>
+    <span class="spacer"></span>
+    <div class="switch-row">
+      <span class="switch-text">
+        <strong>详细日志</strong>
+        <small>开启后记录请求正文（含 prompt）</small>
+      </span>
+      <button
+        class="switch"
+        type="button"
+        role="switch"
+        :aria-checked="verbose"
+        aria-label="详细日志"
+        @click="toggleVerbose"
+      ></button>
     </div>
-    <div class="log-toolbar">
-      <span class="state-line warn">{{ rows.length }} / {{ max }}</span>
-      <button class="line-action" :class="{ active: verbose }" @click="toggleVerbose">
-        详细日志 {{ verbose ? "开" : "关" }}
-      </button>
-      <button class="line-action" @click="clear">清空</button>
-    </div>
-  </section>
+    <button class="btn btn-secondary btn-sm" @click="clear">清空</button>
+  </div>
 
-  <section class="panel empty-state" v-if="rows.length === 0">
-    <span class="section-number">03</span>
+  <p class="notice plain" style="margin-bottom: 16px">
+    默认仅记录代理元数据；开启「详细日志」后会额外记录请求正文，点击请求行即可展开。
+  </p>
+
+  <section v-if="rows.length === 0" class="card empty-state">
     <h2>等待请求</h2>
     <p>启动代理后，用 OpenAI、Responses 或 Anthropic 客户端连接本地端口。</p>
   </section>
@@ -127,51 +133,22 @@ function clear() {
         :class="{ clickable: canExpand(r) }"
         @click="toggleRow(r)"
       >
-        <span class="row-index">{{ String(i + 1).padStart(2, "0") }}</span>
-        <span :class="['state-line', tagClass(r.kind, r.status)]">{{ logLabel(r) }}</span>
-        <code>{{ r.path || "—" }}</code>
-        <span class="muted">{{ fmtTime(r.ts) }}</span>
-        <span v-if="r.kind === 'request'" class="muted">
-          model={{ r.model || "—" }} · stream={{ r.stream ? "true" : "false" }}
-          <span v-if="canExpand(r)">· {{ expanded.has(r) ? "收起" : "展开" }}</span>
+        <span :class="['pill', 'pill-sm', tagClass(r.kind, r.status)]">{{ logLabel(r) }}</span>
+        <code class="log-path">{{ r.path || "—" }}</code>
+        <span class="log-meta">
+          <template v-if="r.kind === 'request'">
+            model={{ r.model || "—" }} · stream={{ r.stream ? "true" : "false" }}
+            <span v-if="canExpand(r)">· {{ expanded.has(r) ? "收起" : "展开" }}</span>
+          </template>
+          <template v-else-if="r.kind === 'response'">
+            {{ r.elapsed_ms ?? "—" }}ms
+            <span v-if="canExpand(r)">· {{ expanded.has(r) ? "收起" : "展开" }}</span>
+          </template>
+          <template v-else>{{ r.message }} · {{ r.elapsed_ms ?? "—" }}ms</template>
         </span>
-        <span v-else-if="r.kind === 'response'" class="muted">
-          {{ r.elapsed_ms ?? "—" }}ms
-          <span v-if="canExpand(r)">· {{ expanded.has(r) ? "收起" : "展开" }}</span>
-        </span>
-        <span v-else class="muted">{{ r.message }} · {{ r.elapsed_ms ?? "—" }}ms</span>
+        <time class="log-time">{{ fmtTime(r.ts) }}</time>
       </article>
       <pre v-if="expanded.has(r) && r.body != null" class="log-detail">{{ pretty(r.body) }}</pre>
     </template>
   </section>
 </template>
-
-<style scoped>
-.line-action.active {
-  background: var(--ink);
-  color: var(--bg);
-}
-
-.log-row.clickable {
-  cursor: pointer;
-}
-
-.log-row.clickable:hover {
-  background: var(--surface-soft);
-}
-
-.log-detail {
-  margin: 0 0 0 120px;
-  padding: 18px 32px 18px 48px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-soft);
-  border-radius: 0;
-  color: var(--ink);
-  font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-x: auto;
-}
-</style>

@@ -109,83 +109,84 @@ onMounted(refreshAuth);
 
 <template>
   <section class="login-grid">
-    <div class="panel login-form">
-      <div class="panel-heading">
-        <p class="section-number">02</p>
-        <div>
-          <h2>OAuth</h2>
-          <p>使用 miclaw 权限小米账号登录，凭证只写入系统 Keychain。</p>
-        </div>
-      </div>
+    <div class="card login-form">
+      <h2 class="card-title">小米账号</h2>
+      <p class="card-desc">使用 miclaw 权限小米账号登录，凭证只写入系统 Keychain。</p>
 
       <div v-if="auth?.authenticated" class="signed-in">
-        <span class="state-line ok">已登录 {{ auth.nick ?? auth.user_id ?? "" }}</span>
+        <span class="pill ok">已登录 {{ auth.nick ?? auth.user_id ?? "" }}</span>
         <p v-if="auth.refreshed_at">最后刷新：{{ new Date(auth.refreshed_at).toLocaleString() }}</p>
-        <button class="primary-action danger" :disabled="busy" @click="logout">退出登录</button>
+        <button class="btn btn-danger" :disabled="busy" @click="logout">退出登录</button>
       </div>
 
       <form v-else class="form-stack" @submit.prevent="doLogin">
-        <label>
+        <label class="field">
           <span>账号 / 邮箱 / 手机号</span>
           <input v-model="account" autocomplete="username" placeholder="user@example.com" />
         </label>
-        <label>
+        <label class="field">
           <span>密码</span>
           <input type="password" v-model="password" autocomplete="current-password" />
         </label>
-        <label v-if="flow === 'captcha'">
+        <label v-if="flow === 'captcha'" class="field">
           <span>图形验证码</span>
           <img v-if="captchaUrl" class="captcha" :src="captchaUrl" alt="captcha" />
           <input v-model="captcha" />
         </label>
-        <button class="primary-action" :disabled="busy || !account || !password" type="submit">
+        <button class="btn btn-primary" :disabled="busy || !account || !password" type="submit">
           登录
         </button>
       </form>
 
-      <p v-if="message" class="notice ok">{{ message }}</p>
-      <p v-if="error" class="notice bad">{{ error }}</p>
+      <div v-if="message || error" style="margin-top: 16px; display: grid; gap: 10px">
+        <p v-if="message" class="notice ok">{{ message }}</p>
+        <p v-if="error" class="notice bad">{{ error }}</p>
+      </div>
+
+      <div v-if="!auth?.authenticated && flow === 'two_factor'" class="two-factor-row">
+        <label class="field">
+          <span>验证方式</span>
+          <select v-model.number="flag">
+            <option v-for="o in options" :key="o" :value="o">
+              {{ o === 4 ? "短信" : o === 8 ? "邮箱" : `flag=${o}` }}
+            </option>
+          </select>
+        </label>
+        <button class="btn btn-secondary" :disabled="busy" @click="sendTicket">发送验证码</button>
+        <label class="field">
+          <span>验证码</span>
+          <input v-model="ticket" inputmode="numeric" />
+        </label>
+        <button class="btn btn-primary" :disabled="busy || !ticket" @click="verify">完成验证</button>
+      </div>
     </div>
 
-    <aside class="panel auth-steps">
-      <div class="panel-heading compact">
-        <p class="section-number">03</p>
-        <div>
-          <h2>令牌流程</h2>
-          <p>桥接器会自动换取超级小爱使用的 miclaw serviceToken。</p>
-        </div>
-      </div>
+    <aside class="card auth-steps">
+      <h2 class="card-title">令牌流程</h2>
+      <p class="card-desc">桥接器会自动换取超级小爱使用的 miclaw serviceToken。</p>
       <ol>
-        <li><span>01</span><strong>账号认证</strong><p>密码登录与二步验证。</p></li>
-        <li><span>02</span><strong>sid=miclaw</strong><p>用 passToken 换服务令牌。</p></li>
-        <li><span>03</span><strong>超级小爱 v2</strong><p>本地代理携带 serviceToken 请求。</p></li>
+        <li>
+          <span class="step-num">1</span>
+          <div>
+            <strong>账号认证</strong>
+            <p>密码登录与二步验证。</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-num">2</span>
+          <div>
+            <strong>sid=miclaw</strong>
+            <p>用 passToken 换服务令牌。</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-num">3</span>
+          <div>
+            <strong>超级小爱 v2</strong>
+            <p>本地代理携带 serviceToken 请求。</p>
+          </div>
+        </li>
       </ol>
     </aside>
-  </section>
-
-  <section class="panel" v-if="!auth?.authenticated && flow === 'two_factor'">
-    <div class="panel-heading">
-      <p class="section-number">04</p>
-      <div>
-        <h2>二步验证</h2>
-        <p>选择验证码通道，收到验证码后完成登录。</p>
-      </div>
-    </div>
-    <div class="two-factor-row">
-      <label>
-        <span>验证方式</span>
-        <select v-model.number="flag">
-          <option v-for="o in options" :key="o" :value="o">
-            {{ o === 4 ? "短信" : o === 8 ? "邮箱" : `flag=${o}` }}
-          </option>
-        </select>
-      </label>
-      <button class="line-action" :disabled="busy" @click="sendTicket">发送验证码</button>
-      <label>
-        <span>验证码</span>
-        <input v-model="ticket" inputmode="numeric" />
-      </label>
-      <button class="primary-action" :disabled="busy || !ticket" @click="verify">完成验证</button>
-    </div>
   </section>
 </template>

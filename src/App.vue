@@ -7,18 +7,15 @@ type Theme = "light" | "dark";
 
 const route = useRoute();
 const theme = ref<Theme>("light");
-const patternLetters = ["M", "I", "M", "O"];
-const patternRows = Array.from({ length: 8 }, (_, row) =>
-  Array.from({ length: 18 }, (_, col) => patternLetters[(col + (row % 2)) % patternLetters.length]),
-);
 
 const pageTitle = computed(() => {
-  if (route.path.includes("admin-login")) return "后台登录";
-  if (route.path.includes("login")) return "小米账号";
-  if (route.path.includes("logs")) return "代理日志";
-  if (route.path.includes("keys")) return "API 密钥";
-  if (route.path.includes("usage")) return "用量统计";
-  return "本地代理";
+  const meta = route.meta as { title?: string };
+  return meta.title ?? "本地代理";
+});
+
+const pageSubtitle = computed(() => {
+  const meta = route.meta as { subtitle?: string };
+  return meta.subtitle ?? "";
 });
 
 const isAuthGate = computed(() => route.path.includes("admin-login"));
@@ -77,82 +74,111 @@ watchEffect(() => {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'has-banner': showBanner }">
-    <div v-if="showBanner" class="pw-banner" role="status">
-      <span class="pw-banner-text" v-if="bannerStage === 0">
-        管理后台尚未设置密码，建议
-        <RouterLink to="/admin-login">设置管理后台密码</RouterLink>
-      </span>
-      <span class="pw-banner-text" v-else>
-        需要时在地址栏访问 <code>#/admin-login</code> 即可进入设置页。
-      </span>
-      <button
-        class="pw-banner-close"
-        type="button"
-        :aria-label="bannerStage === 0 ? '关闭提示' : '彻底关闭提示'"
-        @click="dismissBanner"
-      >
-        ×
-      </button>
-    </div>
-
-    <header class="topbar">
-      <RouterLink class="brand-lockup" to="/dashboard" aria-label="miclaw_api_bridge dashboard">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <RouterLink class="sidebar-brand" to="/dashboard" aria-label="miclaw_api_bridge dashboard">
         <img :src="appIcon" alt="" />
         <span>miclaw_api_bridge</span>
       </RouterLink>
 
-      <nav class="topnav" aria-label="主导航" v-if="!isAuthGate">
-        <RouterLink to="/dashboard">Proxy</RouterLink>
-        <RouterLink to="/login">Account</RouterLink>
-        <RouterLink to="/keys">Keys</RouterLink>
-        <RouterLink to="/usage">Usage</RouterLink>
-        <RouterLink to="/logs">Logs</RouterLink>
+      <nav class="side-nav" aria-label="主导航" v-if="!isAuthGate">
+        <RouterLink class="nav-item" to="/dashboard">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
+            <rect x="13.5" y="3.5" width="7" height="7" rx="2" />
+            <rect x="3.5" y="13.5" width="7" height="7" rx="2" />
+            <rect x="13.5" y="13.5" width="7" height="7" rx="2" />
+          </svg>
+          <span>代理</span>
+        </RouterLink>
+        <RouterLink class="nav-item" to="/login">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="8.2" r="3.7" />
+            <path d="M4.8 20.2c.9-3.5 3.8-5.4 7.2-5.4s6.3 1.9 7.2 5.4" />
+          </svg>
+          <span>账号</span>
+        </RouterLink>
+        <RouterLink class="nav-item" to="/keys">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="8.2" cy="15.8" r="4" />
+            <path d="M11.2 12.8 20 4M16.2 7.8l2.6 2.6M13.6 10.4l2.1 2.1" />
+          </svg>
+          <span>密钥</span>
+        </RouterLink>
+        <RouterLink class="nav-item" to="/usage">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4.5 20V10.5M10.5 20V4.5M16.5 20v-9M21.5 20h-19" />
+          </svg>
+          <span>用量</span>
+        </RouterLink>
+        <RouterLink class="nav-item" to="/logs">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4.5 6.5h15M4.5 12h15M4.5 17.5h9" />
+          </svg>
+          <span>日志</span>
+        </RouterLink>
       </nav>
 
-      <a
-        class="icon-button github-link"
-        href="https://github.com/NEORUAA/miclaw_api_bridge"
-        target="_blank"
-        rel="noopener noreferrer"
-        title="GitHub"
-        aria-label="在 GitHub 上查看"
-      >
-        <svg class="github-mark" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-1.8c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 .1.8 1.7 2.6 1.2.1-.7.4-1.2.7-1.5-2.5-.3-5.2-1.3-5.2-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.2 5.7.4.3.8 1 .8 2.1v3.1c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z" />
-        </svg>
-      </a>
-
-      <button
-        class="icon-button"
-        type="button"
-        :title="theme === 'dark' ? '切换浅色模式' : '切换深色模式'"
-        :aria-label="theme === 'dark' ? '切换浅色模式' : '切换深色模式'"
-        @click="toggleTheme"
-      >
-        <svg v-if="theme === 'dark'" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 3v2.1M12 18.9V21M4.4 4.4l1.5 1.5M18.1 18.1l1.5 1.5M3 12h2.1M18.9 12H21M4.4 19.6l1.5-1.5M18.1 5.9l1.5-1.5" />
-          <circle cx="12" cy="12" r="4.2" />
-        </svg>
-        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M20.4 14.2A7.7 7.7 0 0 1 9.8 3.6 8.7 8.7 0 1 0 20.4 14.2Z" />
-        </svg>
-      </button>
-    </header>
-
-    <section class="page-hero" aria-label="当前页面">
-      <div class="pattern" aria-hidden="true">
-        <span v-for="(row, rowIndex) in patternRows" :key="rowIndex" class="pattern-row">
-          <b v-for="(letter, colIndex) in row" :key="`${rowIndex}-${colIndex}`">{{ letter }}</b>
-        </span>
+      <div class="sidebar-footer">
+        <a
+          class="icon-button"
+          href="https://github.com/NEORUAA/miclaw_api_bridge"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="GitHub"
+          aria-label="在 GitHub 上查看"
+        >
+          <svg class="github-mark" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-1.8c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 .1.8 1.7 2.6 1.2.1-.7.4-1.2.7-1.5-2.5-.3-5.2-1.3-5.2-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.2 5.7.4.3.8 1 .8 2.1v3.1c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z" />
+          </svg>
+        </a>
+        <span class="spacer"></span>
+        <button
+          class="icon-button"
+          type="button"
+          :title="theme === 'dark' ? '切换浅色模式' : '切换深色模式'"
+          :aria-label="theme === 'dark' ? '切换浅色模式' : '切换深色模式'"
+          @click="toggleTheme"
+        >
+          <svg v-if="theme === 'dark'" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v2.1M12 18.9V21M4.4 4.4l1.5 1.5M18.1 18.1l1.5 1.5M3 12h2.1M18.9 12H21M4.4 19.6l1.5-1.5M18.1 5.9l1.5-1.5" />
+            <circle cx="12" cy="12" r="4.2" />
+          </svg>
+          <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20.4 14.2A7.7 7.7 0 0 1 9.8 3.6 8.7 8.7 0 1 0 20.4 14.2Z" />
+          </svg>
+        </button>
       </div>
-      <p class="section-number">01</p>
-      <h1>{{ pageTitle }}</h1>
-      <p class="hero-copy">将超级小爱中的 Xiaomi MiMo 模型转接成本地 OpenAI / Anthropic 兼容端点。</p>
-    </section>
+    </aside>
 
-    <main class="content">
-      <RouterView />
-    </main>
+    <div class="main">
+      <div v-if="showBanner" class="pw-banner" role="status">
+        <span class="pw-banner-text" v-if="bannerStage === 0">
+          管理后台尚未设置密码，建议
+          <RouterLink to="/admin-login">设置管理后台密码</RouterLink>
+        </span>
+        <span class="pw-banner-text" v-else>
+          需要时在地址栏访问 <code>#/admin-login</code> 即可进入设置页。
+        </span>
+        <button
+          class="pw-banner-close"
+          type="button"
+          :aria-label="bannerStage === 0 ? '关闭提示' : '彻底关闭提示'"
+          @click="dismissBanner"
+        >
+          ×
+        </button>
+      </div>
+
+      <main class="content">
+        <div class="content-inner">
+          <header v-if="!isAuthGate" class="page-header">
+            <h1>{{ pageTitle }}</h1>
+            <p v-if="pageSubtitle">{{ pageSubtitle }}</p>
+          </header>
+          <RouterView />
+        </div>
+      </main>
+    </div>
   </div>
 </template>
