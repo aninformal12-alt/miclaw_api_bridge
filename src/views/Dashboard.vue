@@ -221,7 +221,7 @@ onMounted(refreshAll);
     <div class="list-group">
       <div v-for="(m, index) in models" :key="m.id" class="list-row" style="grid-template-columns: 34px minmax(210px, 0.8fr) minmax(0, 1.4fr)">
         <span class="row-index">{{ String(index + 1).padStart(2, "0") }}</span>
-        <code class="code-chip">{{ m.id }}</code>
+        <code class="code-chip model-name">{{ m.id }}</code>
         <span class="muted" style="font-size: 12.5px">{{ m.family }}</span>
       </div>
     </div>

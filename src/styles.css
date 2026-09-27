@@ -695,6 +695,16 @@ select:focus {
   color: var(--ink);
 }
 
+/* Model names in the dashboard catalog: larger semibold chip, same footprint */
+.code-chip.model-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  padding: 9px 13px;
+  border-radius: 10px;
+  background: var(--fill-strong);
+}
+
 .endpoint-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
