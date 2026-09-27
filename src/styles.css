@@ -18,6 +18,15 @@
   --input-border: rgba(0, 0, 0, 0.14);
   --sidebar-bg: rgba(240, 240, 245, 0.8);
 
+  /* SF Pro when installed locally (reference only, never bundled); Inter
+     webfont is the portable look-alike fallback; MiSans covers CJK. */
+  --font-body:
+    "SF Pro Text", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "MiSans", "MiSans VF",
+    "PingFang SC", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+  --font-display:
+    "SF Pro Display", "SF Pro Text", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "MiSans", "MiSans VF", "PingFang SC", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+
   --accent: #0071e3;
   --accent-hover: #0077ed;
   --accent-soft: rgba(0, 113, 227, 0.12);
@@ -35,9 +44,7 @@
 
   color: var(--ink);
   background: var(--bg);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "MiSans", "MiSans VF",
-    "PingFang SC", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+  font-family: var(--font-body);
   font-size: 14px;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -309,6 +316,7 @@ code {
 
 .page-header h1 {
   margin: 0;
+  font-family: var(--font-display);
   font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.022em;
@@ -390,6 +398,7 @@ code {
   justify-content: space-between;
   gap: 12px;
   margin: 0 0 2px;
+  font-family: var(--font-display);
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -782,6 +791,7 @@ select:focus {
 
 .status-card strong {
   display: block;
+  font-family: var(--font-display);
   font-size: 21px;
   font-weight: 600;
   letter-spacing: -0.02em;
