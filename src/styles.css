@@ -150,6 +150,9 @@ code {
 .app-shell {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
+  /* Constrain the single implicit row to the viewport so .content (not the
+     shell) grows with long pages and scrolls internally. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   background: var(--bg);
 }
@@ -158,6 +161,7 @@ code {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .sidebar {
