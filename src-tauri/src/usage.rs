@@ -101,8 +101,29 @@ impl UsageStore {
             _ => (86_400_000, 3_600_000),         // 1d: 24 × 1 hour
         };
         let now = now_ms();
-        let start = now - range_ms;
-        let n = (range_ms / bucket_ms) as usize;
+        // 7d/30d anchor the window to today's LOCAL midnight so the running
+        // (partial) day stays its own bucket; now-relative day bins used to
+        // fold today's usage into the bar labeled with yesterday's date.
+        let day_aligned = window == "7d" || window == "30d";
+        let today_start = chrono::Local::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .expect("00:00:00 is a valid time")
+            .and_local_timezone(chrono::Local)
+            .earliest()
+            .map(|dt| dt.timestamp_millis())
+            .unwrap_or(now - range_ms);
+        let start = if day_aligned {
+            let back_days: i64 = if window == "30d" { 29 } else { 6 };
+            today_start - back_days * 86_400_000
+        } else {
+            now - range_ms
+        };
+        let n = if day_aligned {
+            if window == "30d" { 30 } else { 7 }
+        } else {
+            (range_ms / bucket_ms) as usize
+        };
 
         // per bucket: model -> [prompt, completion, total]
         let mut buckets: Vec<BTreeMap<String, [i64; 3]>> = vec![BTreeMap::new(); n];
