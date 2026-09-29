@@ -88,7 +88,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   const text = await resp.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: any = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      /* non-JSON body (e.g. an HTML error page): fall through to the
+         status-based message below instead of throwing SyntaxError */
+    }
+  }
   if (!resp.ok) {
     const message = data?.error?.message ?? `${resp.status} ${resp.statusText}`;
     const err = new Error(message) as Error & { status?: number };

@@ -1,6 +1,12 @@
 import { createApp } from "vue";
-import { createPinia } from "pinia";
 import { createRouter, createWebHashHistory } from "vue-router";
+// Self-hosted Inter (portable look-alike for machines without SF Pro). The
+// MiSans CJK fallback stays in the font stack by name only; Chinese text
+// falls back to the system CJK font when it is not installed locally.
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/inter/700.css";
 import App from "./App.vue";
 import Dashboard from "./views/Dashboard.vue";
 import Login from "./views/Login.vue";
@@ -19,7 +25,7 @@ const router = createRouter({
     { path: "/login", component: Login, meta: { title: "小米账号", subtitle: "登录后即可使用超级小爱积分额度" } },
     { path: "/logs", component: Logs, meta: { title: "实时日志", subtitle: "代理请求实时事件流" } },
     { path: "/keys", component: ApiKeys, meta: { title: "API 密钥", subtitle: "管理 /v1 接口的 Bearer 鉴权" } },
-    { path: "/usage", component: Usage, meta: { title: "用量统计", subtitle: "按模型统计的 Token 消耗" } },
+    { path: "/usage", component: Usage, meta: { title: "用量统计", subtitle: "Token 消耗趋势、输入输出拆分与模型分布" } },
     { path: "/admin-login", component: AdminLogin, meta: { title: "后台登录", authGate: true } },
   ],
 });
@@ -45,4 +51,4 @@ router.beforeEach(async (to) => {
   return true;
 });
 
-createApp(App).use(createPinia()).use(router).mount("#app");
+createApp(App).use(router).mount("#app");

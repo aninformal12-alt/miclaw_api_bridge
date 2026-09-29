@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 import { api } from "../api";
 
 interface LogRow {
+  id: number;
   ts: number;
   kind: "request" | "response" | "error" | string;
   path?: string;
@@ -17,10 +18,13 @@ interface LogRow {
 const rows = ref<LogRow[]>([]);
 const max = 500;
 const verbose = ref(false);
-const expanded = ref<Set<LogRow>>(new Set());
+const streamDown = ref(false);
+const expanded = ref<Set<number>>(new Set());
 let events: EventSource | null = null;
+let seq = 0;
 
 function push(row: LogRow) {
+  row.id = ++seq;
   rows.value.unshift(row);
   if (rows.value.length > max) rows.value.length = max;
 }
@@ -32,9 +36,23 @@ onMounted(async () => {
     /* keep default */
   }
   const resp = await fetch("/api/logs");
-  if (resp.ok) rows.value = await resp.json();
+  if (resp.ok) {
+    const snapshot = (await resp.json()) as LogRow[];
+    rows.value = snapshot.map((r) => ({ ...r, id: ++seq }));
+  }
   events = new EventSource("/api/logs/stream");
-  events.onmessage = (event) => push(JSON.parse(event.data) as LogRow);
+  events.onopen = () => (streamDown.value = false);
+  events.onmessage = (event) => {
+    try {
+      push(JSON.parse(event.data) as LogRow);
+      streamDown.value = false;
+    } catch {
+      /* ignore malformed frames */
+    }
+  };
+  // EventSource retries on its own; just surface the gap so the UI doesn't
+  // look live while it is actually disconnected.
+  events.onerror = () => (streamDown.value = true);
 });
 
 onBeforeUnmount(() => {
@@ -57,7 +75,7 @@ function canExpand(r: LogRow) {
 function toggleRow(r: LogRow) {
   if (!canExpand(r)) return;
   const next = new Set(expanded.value);
-  next.has(r) ? next.delete(r) : next.add(r);
+  next.has(r.id) ? next.delete(r.id) : next.add(r.id);
   expanded.value = next;
 }
 
@@ -117,6 +135,10 @@ function clear() {
     <button class="btn btn-secondary btn-sm" @click="clear">清空</button>
   </div>
 
+  <p v-if="streamDown" class="notice warn" style="margin-bottom: 16px">
+    实时日志流已断开，正在自动重连…
+  </p>
+
   <p class="notice plain" style="margin-bottom: 16px">
     默认仅记录代理元数据；开启「详细日志」后会额外记录请求正文，点击请求行即可展开。
   </p>
@@ -127,28 +149,33 @@ function clear() {
   </section>
 
   <section v-else class="log-list" aria-label="代理日志列表">
-    <template v-for="(r, i) in rows" :key="i">
+    <template v-for="r in rows" :key="r.id">
       <article
         class="log-row"
         :class="{ clickable: canExpand(r) }"
+        :role="canExpand(r) ? 'button' : undefined"
+        :tabindex="canExpand(r) ? 0 : undefined"
+        :aria-expanded="canExpand(r) ? expanded.has(r.id) : undefined"
         @click="toggleRow(r)"
+        @keydown.enter.prevent="toggleRow(r)"
+        @keydown.space.prevent="toggleRow(r)"
       >
         <span :class="['pill', 'pill-sm', tagClass(r.kind, r.status)]">{{ logLabel(r) }}</span>
         <code class="log-path">{{ r.path || "—" }}</code>
         <span class="log-meta">
           <template v-if="r.kind === 'request'">
             model={{ r.model || "—" }} · stream={{ r.stream ? "true" : "false" }}
-            <span v-if="canExpand(r)">· {{ expanded.has(r) ? "收起" : "展开" }}</span>
+            <span v-if="canExpand(r)">· {{ expanded.has(r.id) ? "收起" : "展开" }}</span>
           </template>
           <template v-else-if="r.kind === 'response'">
             {{ r.elapsed_ms ?? "—" }}ms
-            <span v-if="canExpand(r)">· {{ expanded.has(r) ? "收起" : "展开" }}</span>
+            <span v-if="canExpand(r)">· {{ expanded.has(r.id) ? "收起" : "展开" }}</span>
           </template>
           <template v-else>{{ r.message }} · {{ r.elapsed_ms ?? "—" }}ms</template>
         </span>
         <time class="log-time">{{ fmtTime(r.ts) }}</time>
       </article>
-      <pre v-if="expanded.has(r) && r.body != null" class="log-detail">{{ pretty(r.body) }}</pre>
+      <pre v-if="expanded.has(r.id) && r.body != null" class="log-detail">{{ pretty(r.body) }}</pre>
     </template>
   </section>
 </template>

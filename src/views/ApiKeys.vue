@@ -37,6 +37,7 @@ async function create() {
 }
 
 async function remove(id: string) {
+  if (!window.confirm("确定删除该 Key？使用它的客户端会立即失去访问权限。")) return;
   busy.value = true;
   try {
     await api.deleteKey(id);
@@ -64,11 +65,24 @@ async function copySecret() {
   if (!createdSecret.value) return;
   try {
     await navigator.clipboard.writeText(createdSecret.value);
-    copied.value = true;
-    setTimeout(() => (copied.value = false), 1500);
   } catch {
-    /* clipboard may be unavailable over plain http */
+    // Clipboard API is unavailable over plain http on non-localhost hosts —
+    // fall back to the legacy hidden-textarea path.
+    const ta = document.createElement("textarea");
+    ta.value = createdSecret.value;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } catch {
+      /* give up silently; the secret stays visible on screen */
+    }
+    ta.remove();
   }
+  copied.value = true;
+  setTimeout(() => (copied.value = false), 1500);
 }
 
 function fmt(ts: number | null) {
@@ -137,37 +151,3 @@ onMounted(load);
     </div>
   </section>
 </template>
-
-<style scoped>
-.secret-reveal {
-  margin-top: 1rem;
-  padding: 0 32px 32px 120px;
-}
-.secret-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.35rem;
-}
-.secret-row code {
-  flex: 1;
-  word-break: break-all;
-}
-.key-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) 1fr 1fr 1fr auto;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 0;
-  border-bottom: 1px solid var(--hairline, rgba(128, 128, 128, 0.2));
-}
-.key-row .muted {
-  opacity: 0.65;
-  font-size: 0.85em;
-}
-@media (max-width: 720px) {
-  .key-row {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-</style>

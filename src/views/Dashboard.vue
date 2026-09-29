@@ -57,16 +57,21 @@ async function refreshAll() {
       quota.value = null;
     });
   } catch (e: any) {
-    err.value = String(e);
+    err.value = e?.message ?? String(e);
   }
 }
 
 async function applyPort() {
+  const port = Number(portInput.value);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    err.value = "端口必须是 1024–65535 之间的整数。";
+    return;
+  }
   busy.value = true;
   try {
     proxy.value = await api.setProxyPort(portInput.value);
   } catch (e: any) {
-    err.value = String(e);
+    err.value = e?.message ?? String(e);
   } finally {
     busy.value = false;
   }
@@ -78,7 +83,7 @@ async function refreshAuth() {
     auth.value = await api.refreshSession();
     await loadQuota();
   } catch (e: any) {
-    err.value = String(e);
+    err.value = e?.message ?? String(e);
   } finally {
     busy.value = false;
   }
@@ -89,7 +94,7 @@ async function refreshQuota() {
   try {
     await loadQuota();
   } catch (e: any) {
-    err.value = String(e);
+    err.value = e?.message ?? String(e);
   } finally {
     busy.value = false;
   }
@@ -136,7 +141,9 @@ onMounted(refreshAll);
     <p class="card-desc">启动后，任何 OpenAI / Claude 兼容客户端都可以连到本机。</p>
 
     <div class="inline-form" style="margin-bottom: 18px">
-      <span class="pill ok">服务运行中</span>
+      <span :class="['pill', proxy?.running ? 'ok' : 'bad']">
+        {{ proxy?.running ? "服务运行中" : "服务未运行" }}
+      </span>
       <label class="field" for="proxy-port" style="max-width: 220px">
         <span>监听端口</span>
         <input id="proxy-port" type="number" v-model.number="portInput" min="1024" max="65535" />

@@ -12,7 +12,7 @@
     "build:binaries": "bash scripts/build-binaries.sh"
   },
   "dependencies": {
-    "pinia": "^2.2.4",
+    "@fontsource/inter": "^5.0.0",
     "vue": "^3.5.12",
     "vue-router": "^4.4.5"
   },

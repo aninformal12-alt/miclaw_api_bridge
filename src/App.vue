@@ -1,12 +1,28 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, watchEffect } from "vue";
+import { computed, ref, watch, watchEffect } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
 import appIcon from "../src-tauri/icons/icon.png";
 
 type Theme = "light" | "dark";
 
 const route = useRoute();
-const theme = ref<Theme>("light");
+
+// Initialize synchronously at setup (not onMounted): index.html's inline
+// script has already stamped data-theme before first paint, and this ref must
+// agree with it immediately or the watchEffect below would flip it back.
+function initialTheme(): Theme {
+  const saved = localStorage.getItem("miclaw-theme");
+  if (saved === "light" || saved === "dark") return saved;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+const theme = ref<Theme>(initialTheme());
+
+// Follow OS theme changes while the user hasn't pinned an explicit choice.
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+  if (!localStorage.getItem("miclaw-theme")) {
+    theme.value = e.matches ? "dark" : "light";
+  }
+});
 
 const pageTitle = computed(() => {
   const meta = route.meta as { title?: string };
@@ -18,7 +34,7 @@ const pageSubtitle = computed(() => {
   return meta.subtitle ?? "";
 });
 
-const isAuthGate = computed(() => route.path.includes("admin-login"));
+const isAuthGate = computed(() => route.meta.authGate === true);
 
 // Password-setup reminder banner. It appears once the user chose "暂不设置"
 // on the setup page (skipPwSetup flag) and a password is still not set. The
@@ -58,15 +74,6 @@ function applyTheme(next: Theme) {
 function toggleTheme() {
   applyTheme(theme.value === "dark" ? "light" : "dark");
 }
-
-onMounted(() => {
-  const saved = localStorage.getItem("miclaw-theme") as Theme | null;
-  if (saved === "light" || saved === "dark") {
-    theme.value = saved;
-    return;
-  }
-  theme.value = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-});
 
 watchEffect(() => {
   document.documentElement.dataset.theme = theme.value;
