@@ -9,8 +9,9 @@ const ORG: &str = "neoruaa";
 const APP: &str = "miclaw_api_bridge";
 
 /// Application-wide on-disk storage. Stores plaintext settings (proxy port)
-/// plus opaque blobs persisted by sub-modules. Sensitive credentials should
-/// go through the keyring helpers in `storage::keyring` (TODO).
+/// plus opaque blobs persisted by sub-modules. Sensitive credentials live in
+/// the OS keyring (`auth::keyring_*`); the on-disk blob is only a documented
+/// Docker / opt-in fallback.
 pub struct Storage {
     config_dir: PathBuf,
     data_dir: PathBuf,
@@ -77,7 +78,21 @@ impl Storage {
         let settings_path = config_dir.join("settings.json");
         let settings = if settings_path.exists() {
             let raw = fs::read_to_string(&settings_path)?;
-            serde_json::from_str(&raw).unwrap_or_default()
+            match serde_json::from_str(&raw) {
+                Ok(v) => v,
+                Err(e) => {
+                    // A corrupt settings file must not silently downgrade
+                    // security-relevant flags (TLS, API key requirement).
+                    // Keep defaults, but preserve the original for inspection.
+                    tracing::error!(
+                        target = "storage",
+                        "settings.json is corrupt ({e}); using defaults and \
+                         backing the original up as settings.json.corrupt"
+                    );
+                    let _ = fs::copy(&settings_path, config_dir.join("settings.json.corrupt"));
+                    Settings::default()
+                }
+            }
         } else {
             Settings::default()
         };
@@ -113,7 +128,11 @@ impl Storage {
     fn persist_settings(&self) -> Result<()> {
         let snapshot = self.settings.read().clone();
         let path = self.config_dir.join("settings.json");
-        fs::write(path, serde_json::to_vec_pretty(&snapshot)?)?;
+        // Write-then-rename so a crash mid-write can't leave a truncated
+        // settings.json (which would silently reset TLS / API key flags).
+        let tmp = self.config_dir.join("settings.json.tmp");
+        fs::write(&tmp, serde_json::to_vec_pretty(&snapshot)?)?;
+        fs::rename(&tmp, &path)?;
         Ok(())
     }
 
@@ -127,10 +146,19 @@ impl Storage {
         Ok(Some(serde_json::from_str(&raw)?))
     }
 
-    /// Persist a JSON blob to data dir.
+    /// Persist a JSON blob to data dir (atomic via temp+rename).
     pub fn save_blob<T: Serialize>(&self, name: &str, value: &T) -> Result<()> {
+        let bytes = serde_json::to_vec_pretty(value)?;
+        self.save_blob_bytes(name, &bytes)
+    }
+
+    /// Persist pre-serialized JSON bytes to data dir (atomic via temp+rename).
+    /// Lets hot paths serialize under a lock and write off-thread.
+    pub fn save_blob_bytes(&self, name: &str, bytes: &[u8]) -> Result<()> {
         let path = self.data_dir.join(format!("{name}.json"));
-        fs::write(path, serde_json::to_vec_pretty(value)?)?;
+        let tmp = self.data_dir.join(format!("{name}.json.tmp"));
+        fs::write(&tmp, bytes)?;
+        fs::rename(&tmp, &path)?;
         Ok(())
     }
 

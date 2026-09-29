@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 /// Upper bound for the in-flight SSE reassembly buffer. mimo's chunks are a few
 /// KB of JSON each; if the upstream never emits a `\n\n` delimiter the buffer
 /// would otherwise grow without limit, so we treat overflow as a stream error.
-const MAX_SSE_BUFFER: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_SSE_BUFFER: usize = 8 * 1024 * 1024;
 
 
 pub async fn chat(State(ctrl): State<Arc<ProxyController>>, Json(body): Json<Value>) -> Response {
@@ -1635,7 +1635,7 @@ async fn send_event(tx: &mpsc::Sender<Result<Bytes, std::io::Error>>, value: Val
     let _ = tx.send(Ok(Bytes::from(frame))).await;
 }
 
-fn take_sse_packet(buffer: &mut String) -> Option<String> {
+pub(crate) fn take_sse_packet(buffer: &mut String) -> Option<String> {
     let lf = buffer.find("\n\n").map(|idx| (idx, 2));
     let crlf = buffer.find("\r\n\r\n").map(|idx| (idx, 4));
     let (idx, sep_len) = match (lf, crlf) {

@@ -43,7 +43,7 @@ pub const SERVICE_LOGIN_URL: &str =
 pub const SERVICE_LOGIN_AUTH2_URL: &str = "https://account.xiaomi.com/pass/serviceLoginAuth2";
 
 /// Persisted snapshot of the Xiaomi account session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Session {
     pub user_id: Option<String>,
     pub c_user_id: Option<String>,
@@ -53,6 +53,29 @@ pub struct Session {
     pub nick: Option<String>,
     /// Unix-ms when the session was last refreshed. Used by UI only.
     pub refreshed_at: Option<i64>,
+}
+
+fn opt_len(v: &Option<String>) -> String {
+    match v {
+        Some(s) => format!("<{} chars>", s.len()),
+        None => "None".to_string(),
+    }
+}
+
+// Redacted Debug: one accidental `tracing::debug!("{session:?}")` must never
+// print live tokens — only their presence and length.
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("user_id", &self.user_id)
+            .field("c_user_id", &self.c_user_id)
+            .field("pass_token", &opt_len(&self.pass_token))
+            .field("ssecurity", &opt_len(&self.ssecurity))
+            .field("service_token", &opt_len(&self.service_token))
+            .field("nick", &self.nick)
+            .field("refreshed_at", &self.refreshed_at)
+            .finish()
+    }
 }
 
 impl Session {
@@ -88,7 +111,7 @@ impl Session {
 /// `pending_account` / `pending_password_hash` carry the credentials we need
 /// to replay the `serviceLoginAuth2` call after 2FA succeeds — at that
 /// point the server returns ssecurity/passToken/userId/cUserId in one shot.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct LoginFlowContext {
     pub identity_session: Option<String>,
     pub notification_url: Option<String>,
@@ -96,6 +119,19 @@ pub struct LoginFlowContext {
     pub captcha_url: Option<String>,
     pub pending_account: Option<String>,
     pub pending_password_hash: Option<String>,
+}
+
+impl std::fmt::Debug for LoginFlowContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginFlowContext")
+            .field("identity_session", &opt_len(&self.identity_session))
+            .field("notification_url", &self.notification_url)
+            .field("two_factor_options", &self.two_factor_options)
+            .field("captcha_url", &self.captcha_url)
+            .field("pending_account", &self.pending_account)
+            .field("pending_password_hash", &opt_len(&self.pending_password_hash))
+            .finish()
+    }
 }
 
 /// Authentication state plus the live HTTP transport.
@@ -125,8 +161,8 @@ impl Default for AuthState {
 impl std::fmt::Debug for AuthState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthState")
-            .field("session", &self.session)
-            .field("flow", &self.flow)
+            .field("authenticated", &self.session.is_authenticated())
+            .field("flow_active", &self.flow.pending_account.is_some())
             .finish()
     }
 }
@@ -141,6 +177,7 @@ const SESSION_BLOB: &str = "session";
 const KEYRING_SERVICE: &str = "com.neoruaa.miclaw-api-bridge";
 const KEYRING_USER: &str = "session";
 const DISABLE_KEYRING_ENV: &str = "MICLAW_API_BRIDGE_DISABLE_KEYRING";
+const ALLOW_PLAINTEXT_ENV: &str = "MICLAW_API_BRIDGE_ALLOW_PLAINTEXT";
 
 impl AuthState {
     pub fn load(storage: &Storage) -> Result<Self> {
@@ -167,17 +204,24 @@ impl AuthState {
             return Ok(());
         }
 
-        if let Err(e) = keyring_save(&self.session) {
-            tracing::warn!(
-                target = "auth",
-                "keyring write failed, falling back to disk: {e}"
-            );
-            storage.save_blob(SESSION_BLOB, &self.session)?;
-        } else {
-            // Successfully written to keyring — remove any stale plaintext.
-            let _ = storage.delete_blob(SESSION_BLOB);
+        match keyring_save(&self.session) {
+            Ok(()) => {
+                // Successfully written to keyring — remove any stale plaintext.
+                let _ = storage.delete_blob(SESSION_BLOB);
+                Ok(())
+            }
+            Err(e) if plaintext_fallback_allowed() => {
+                tracing::warn!(
+                    target = "auth",
+                    "keyring write failed; plaintext fallback explicitly enabled: {e}"
+                );
+                storage.save_blob(SESSION_BLOB, &self.session)
+            }
+            Err(e) => Err(BridgeError::Storage(format!(
+                "keyring write failed and plaintext fallback is disabled \
+                 (set MICLAW_API_BRIDGE_ALLOW_PLAINTEXT=1 to opt in): {e}"
+            ))),
         }
-        Ok(())
     }
 
     pub fn clear(storage: &Storage) -> Result<()> {
@@ -208,13 +252,19 @@ impl AuthState {
 }
 
 fn keyring_disabled() -> bool {
-    std::env::var(DISABLE_KEYRING_ENV)
-        .map(|v| {
-            matches!(
-                v.as_str(),
-                "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
-            )
-        })
+    env_flag(DISABLE_KEYRING_ENV)
+}
+
+/// The silent "keyring failed → write the session to disk in plaintext"
+/// fallback must be opt-in. Docker images set `DISABLE_KEYRING` explicitly and
+/// don't go through this path at all.
+fn plaintext_fallback_allowed() -> bool {
+    env_flag(ALLOW_PLAINTEXT_ENV)
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
         .unwrap_or(false)
 }
 

@@ -87,8 +87,23 @@ impl UsageStore {
         let now = now_ms();
         if now - *last_flush >= FLUSH_INTERVAL_MS {
             *last_flush = now;
-            // Serialize straight from the locked vec — no full-clone spike.
-            let _ = self.storage.save_blob(BLOB, &*events);
+            // Serialize once under the lock (no full-clone spike), then hand
+            // the bytes to a blocking thread: a multi-MB flush must never run
+            // on a tokio worker in the middle of request handling.
+            let bytes = match serde_json::to_vec_pretty(&*events) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(target = "usage", "usage flush serialize failed: {e}");
+                    return;
+                }
+            };
+            let storage = Arc::clone(&self.storage);
+            let name = BLOB.to_string();
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) = storage.save_blob_bytes(&name, &bytes) {
+                    tracing::warn!(target = "usage", "usage flush write failed: {e}");
+                }
+            });
         }
     }
 

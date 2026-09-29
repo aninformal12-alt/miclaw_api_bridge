@@ -30,6 +30,11 @@ const quotaTone = computed(() => {
 const quotaRemaining = computed(() =>
   quota.value ? new Intl.NumberFormat("zh-CN").format(quota.value.points_remaining) : "—",
 );
+const quotaWidth = computed(() => {
+  const q = quota.value;
+  if (!q || !q.points_limit) return 0;
+  return Math.min(100, Math.max((q.points_used / q.points_limit) * 100, 2));
+});
 const quotaMeta = computed(() => {
   if (!auth.value?.authenticated) return "登录后显示";
   if (!quota.value) return "暂时无法获取";
@@ -124,6 +129,9 @@ onMounted(refreshAll);
     <div class="status-card">
       <span class="label">剩余积分</span>
       <strong :class="quotaTone">{{ quotaRemaining }}</strong>
+      <div v-if="quota" class="quota-track" aria-hidden="true">
+        <div class="quota-fill" :style="{ width: quotaWidth + '%' }"></div>
+      </div>
       <small class="status-meta">{{ quotaMeta }}</small>
     </div>
     <div class="status-card">

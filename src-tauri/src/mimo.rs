@@ -258,6 +258,10 @@ impl QuotaData {
 pub struct MimoClient {
     auth: Arc<RwLock<AuthState>>,
     storage: Option<Arc<Storage>>,
+    /// Serializes 401-triggered token refreshes (and keeps them from
+    /// clobbering a concurrent login's session write). A tokio mutex because
+    /// the guard is held across the network mint.
+    refresh_lock: tokio::sync::Mutex<()>,
     /// One long-lived client for ALL mimo traffic. Previously a fresh client
     /// was built per request, which meant zero connection reuse (a full
     /// TCP+TLS handshake + DNS lookup on every call) and constant allocator
@@ -301,6 +305,7 @@ impl MimoClient {
         Ok(Self {
             auth,
             storage,
+            refresh_lock: tokio::sync::Mutex::new(()),
             client: build_mimo_client()?,
         })
     }
@@ -367,7 +372,8 @@ impl MimoClient {
             "{path} got 401, refreshing sid=miclaw serviceToken"
         );
         let _ = resp.bytes().await; // drain
-        match self.refresh_service_token().await {
+        let stale = self.auth.read().session.service_token.clone();
+        match self.refresh_service_token(&stale).await {
             Ok(()) => {
                 tracing::info!(target = "mimo", "serviceToken refreshed, retrying once");
                 self.post_json_once(path, body).await
@@ -416,7 +422,8 @@ impl MimoClient {
             "{path} got 401, refreshing sid=miclaw serviceToken"
         );
         let _ = resp.bytes().await;
-        match self.refresh_service_token().await {
+        let stale = self.auth.read().session.service_token.clone();
+        match self.refresh_service_token(&stale).await {
             Ok(()) => self.get_once(path).await,
             Err(e) => {
                 tracing::warn!(target = "mimo", "serviceToken refresh failed: {e}");
@@ -438,7 +445,21 @@ impl MimoClient {
 
     /// Re-runs the sid=miclaw token mint using the persisted passToken.
     /// Returns `Err(NotAuthenticated)` when a full login is required.
-    async fn refresh_service_token(&self) -> Result<()> {
+    ///
+    /// `stale` is the serviceToken the failed request was sent with. Once the
+    /// refresh lock is held, a changed session means another request already
+    /// refreshed and the mint is skipped — without this, N concurrent 401s
+    /// mint N tokens that last-writer-wins over each other, and a concurrent
+    /// login's session write could be clobbered by a stale refresh result.
+    async fn refresh_service_token(&self, stale: &Option<String>) -> Result<()> {
+        let _guard = self.refresh_lock.lock().await;
+        if self.auth.read().session.service_token != *stale {
+            tracing::debug!(
+                target = "mimo",
+                "serviceToken already refreshed by a concurrent request; skipping mint"
+            );
+            return Ok(());
+        }
         let session = self.auth.read().session.clone();
         if session.pass_token.is_none() {
             return Err(BridgeError::NotAuthenticated);

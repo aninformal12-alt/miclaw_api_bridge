@@ -1286,3 +1286,19 @@ select:focus {
 a {
   color: var(--accent);
 }
+
+/* Quota usage bar (Dashboard status card) */
+.quota-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill);
+  overflow: hidden;
+  margin: 6px 0 2px;
+}
+
+.quota-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}

@@ -234,6 +234,12 @@ fn anthropic_to_openai_chat(body: &Value) -> std::result::Result<Value, String> 
     } else {
         model
     };
+    // Claude Code appends client-side context-window markers like `[1m]` /
+    // `[1M]`; they are not part of the upstream model id.
+    let model = match model.strip_suffix("[1m]").or_else(|| model.strip_suffix("[1M]")) {
+        Some(stripped) => stripped.to_string(),
+        None => model,
+    };
     out.insert("model".into(), Value::String(model));
 
     let mut messages: Vec<Value> = Vec::new();
@@ -368,6 +374,22 @@ fn anthropic_to_openai_chat(body: &Value) -> std::result::Result<Value, String> 
     if let Some(stop) = body.get("stop_sequences") {
         out.insert("stop".into(), stop.clone());
     }
+    if let Some(tc) = body.get("tool_choice") {
+        // Anthropic → OpenAI tool_choice: {"type":"auto"} → "auto",
+        // {"type":"any"} → "required", {"type":"tool","name":N} → named
+        // function. Silently dropping it (as before) made forced tool calls
+        // behave as auto.
+        let mapped = match tc.get("type").and_then(|v| v.as_str()) {
+            Some("any") => json!("required"),
+            Some("auto") => json!("auto"),
+            Some("tool") => json!({
+                "type": "function",
+                "function": {"name": tc.get("name").and_then(|v| v.as_str()).unwrap_or("")}
+            }),
+            _ => tc.clone(),
+        };
+        out.insert("tool_choice".into(), mapped);
+    }
     if let Some(tools) = body.get("tools").and_then(|v| v.as_array()) {
         let mapped: Vec<Value> = tools
             .iter()
@@ -425,6 +447,31 @@ async fn aggregate_anthropic(
 
     let chunks = collect_chunks(&body_text);
     for chunk in &chunks {
+        // Business errors (quota exhausted, risk control) hide inside 200
+        // responses; surfacing them beats returning a "successful" empty
+        // message.
+        let in_stream_message = if let Some(err) = chunk.get("error") {
+            Some(
+                err.get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("upstream returned an error inside a successful response")
+                    .to_string(),
+            )
+        } else {
+            match chunk.get("code").and_then(|v| v.as_i64()) {
+                Some(c) if c != 0 => Some(
+                    chunk
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("upstream rejected the request")
+                        .to_string(),
+                ),
+                _ => None,
+            }
+        };
+        if let Some(message) = in_stream_message {
+            return anthropic_error_response(&BridgeError::Proxy(message));
+        }
         if let Some(usage) = chunk.get("usage") {
             input_tokens = usage
                 .get("prompt_tokens")
@@ -569,6 +616,9 @@ struct SseTranslator {
 struct TranslatorState {
     started: bool,
     finished: bool,
+    /// Set when the stream must end immediately (in-stream upstream error,
+    /// transport failure, buffer overflow) after the error events are sent.
+    abort: bool,
     msg_id: String,
     /// Open block kind. None = no block open.
     open: Option<OpenBlock>,
@@ -616,10 +666,9 @@ impl SseTranslator {
     }
 
     fn pop_event(&mut self) -> Option<String> {
-        // Each SSE message is terminated by a blank line.
-        let split = self.buf.find("\n\n")?;
-        let block = self.buf[..split].to_string();
-        self.buf.drain(..split + 2);
+        // Each SSE message is terminated by a blank line; accept both LF and
+        // CRLF framing (some proxies rewrite line endings).
+        let block = super::openai::take_sse_packet(&mut self.buf)?;
         let mut data = String::new();
         for line in block.lines() {
             if let Some(rest) = line.strip_prefix("data:") {
@@ -632,6 +681,28 @@ impl SseTranslator {
         Some(data)
     }
 
+    /// Abort the stream with an Anthropic `error` event, then close the
+    /// message properly. Clients already received 200 + message_start, so a
+    /// silent connection drop would look like a truncation; a well-formed
+    /// error surface lets them fail cleanly and retry.
+    fn emit_in_stream_error(&mut self, message: &str, out: &mut Vec<String>) {
+        tracing::warn!(target = "proxy", "anthropic stream error: {message}");
+        out.push(format_sse(
+            "error",
+            &json!({
+                "type": "error",
+                "error": {"type": "api_error", "message": message}
+            }),
+        ));
+        if self.state.started && !self.state.finished {
+            let mut tail = Vec::new();
+            self.finish(&mut tail);
+            out.extend(tail);
+        }
+        self.state.finished = true;
+        self.state.abort = true;
+    }
+
     fn translate(&mut self, data: &str) -> Vec<String> {
         let mut out = Vec::new();
         if data.is_empty() || data == "[DONE]" {
@@ -641,6 +712,35 @@ impl SseTranslator {
             Ok(v) => v,
             Err(_) => return out,
         };
+
+        // Business errors (quota exhausted, risk control) arrive as 200 SSE
+        // frames carrying an error object or a non-zero code instead of
+        // choices. Dropping them used to surface as a "successful" empty
+        // reply indistinguishable from a real empty completion.
+        let in_stream_message = if let Some(err) = chunk.get("error") {
+            Some(
+                err.get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("upstream returned an error inside a successful stream")
+                    .to_string(),
+            )
+        } else {
+            let code = chunk.get("code").and_then(|v| v.as_i64());
+            match code {
+                Some(c) if c != 0 => Some(
+                    chunk
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("upstream rejected the request")
+                        .to_string(),
+                ),
+                _ => None,
+            }
+        };
+        if let Some(message) = in_stream_message {
+            self.emit_in_stream_error(&message, &mut out);
+            return out;
+        }
 
         if !self.state.started {
             self.state.started = true;
@@ -947,6 +1047,11 @@ impl Stream for SseTranslator {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         loop {
+            // A fatal error was already surfaced to the client; end the body
+            // so the upstream connection is dropped too.
+            if this.state.abort {
+                return Poll::Ready(None);
+            }
             // Drain any complete SSE events first.
             if let Some(data) = this.pop_event() {
                 let translated = this.translate(&data);
@@ -960,10 +1065,28 @@ impl Stream for SseTranslator {
                 Poll::Ready(Some(Ok(chunk))) => {
                     let text = this.decoder.push(&chunk);
                     this.buf.push_str(&text);
+                    // A stream that never yields a blank line must not buffer
+                    // without bound (mirrors the OpenAI-side guard).
+                    if this.buf.len() > super::openai::MAX_SSE_BUFFER {
+                        this.buf.clear();
+                        let mut tail = Vec::new();
+                        this.emit_in_stream_error(
+                            "upstream SSE frame exceeded buffer limit",
+                            &mut tail,
+                        );
+                        return Poll::Ready(Some(Ok(Bytes::from(tail.concat()))));
+                    }
                     continue;
                 }
                 Poll::Ready(Some(Err(e))) => {
-                    return Poll::Ready(Some(Err(std::io::Error::other(e))));
+                    this.buf.clear();
+                    let mut tail = Vec::new();
+                    this.emit_in_stream_error(
+                        "upstream stream ended before completion",
+                        &mut tail,
+                    );
+                    let _ = e;
+                    return Poll::Ready(Some(Ok(Bytes::from(tail.concat()))));
                 }
                 Poll::Ready(None) => {
                     if !this.state.finished {

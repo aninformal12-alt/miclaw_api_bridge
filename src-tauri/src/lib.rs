@@ -13,11 +13,13 @@ pub mod storage;
 pub mod usage;
 
 pub fn init_tracing() {
+    // Default to info: the auth module's debug! hop logs can carry URLs whose
+    // query strings embed bearer-equivalent STS credentials, and mimo debug
+    // lines are chatty. Opt into debug with RUST_LOG=debug when diagnosing.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new("info,miclaw_api_bridge_lib=debug")
-            }),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .try_init();
 }

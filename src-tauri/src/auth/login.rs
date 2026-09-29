@@ -636,10 +636,12 @@ async fn follow_chain_for_service_token(
             .get(LOCATION)
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
+        let next_loc_redacted = next_loc.as_deref().map(redact_url);
         tracing::debug!(
             target = "auth",
-            "hop#{hop} status={status} ua={ua} url={current} setCookie={cookie_names:?} location={:?}",
-            next_loc
+            "hop#{hop} status={status} ua={ua} url={} setCookie={cookie_names:?} location={:?}",
+            redact_url(&current),
+            next_loc_redacted
         );
 
         if !status.is_success() && !status.is_redirection() {
@@ -667,7 +669,11 @@ async fn follow_chain_for_service_token(
             cookies_forwarded.extend(new_cookies);
         }
         if found.is_some() {
-            tracing::debug!(target = "auth", "serviceToken captured at {current}");
+            tracing::debug!(
+                target = "auth",
+                "serviceToken captured at {}",
+                redact_url(&current)
+            );
         }
         if status.is_redirection() {
             match next_loc {
@@ -700,6 +706,16 @@ fn absolutize(base: &str, location: &str) -> String {
         }
     }
     location.to_string()
+}
+
+/// Log-safe URL: scheme + host + path only. Some hops in the STS chain
+/// authenticate purely via the `auth=...` query string, so the query must
+/// never reach the logs.
+fn redact_url(raw: &str) -> String {
+    match url::Url::parse(raw) {
+        Ok(u) => format!("{}://{}{}", u.scheme(), u.host_str().unwrap_or("?"), u.path()),
+        Err(_) => "<unparseable url>".to_string(),
+    }
 }
 
 /// Derive a stable `deviceId` cookie value of the form `pc_<32 hex>`. We
@@ -769,6 +785,32 @@ fn read_machine_id() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
+        // `wmic` was removed in Windows 11 24H2; fall back through it to the
+        // Cryptography MachineGuid, which ships with every Windows install
+        // and is a stable per-machine identity.
+        if let Ok(out) = Command::new("reg")
+            .args([
+                "query",
+                r"HKLM\SOFTWARE\Microsoft\Cryptography",
+                "/v",
+                "MachineGuid",
+            ])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("MachineGuid") {
+                    let v = rest
+                        .trim_start()
+                        .trim_start_matches("REG_SZ")
+                        .trim();
+                    if !v.is_empty() {
+                        return Some(v.to_lowercase());
+                    }
+                }
+            }
+        }
         let out = Command::new("wmic")
             .args(["bios", "get", "serialnumber"])
             .output()

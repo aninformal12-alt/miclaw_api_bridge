@@ -48,6 +48,14 @@ pub async fn refresh(state: &Arc<RwLock<AuthState>>, storage: &Arc<Storage>) -> 
     let next = finalize_with_location(&client, location, next).await?;
     {
         let mut guard = state.write();
+        // Compare-and-swap: if a login (or another refresh) replaced the
+        // session while we were on the network, don't clobber it with our
+        // stale result — the caller can simply retry.
+        if guard.session.pass_token != session_snapshot.pass_token {
+            return Err(BridgeError::Login(
+                "session changed during refresh; retry".into(),
+            ));
+        }
         guard.session = next.clone();
         guard.save(storage)?;
     }

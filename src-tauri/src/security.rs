@@ -23,12 +23,18 @@ use std::sync::Arc;
 const BLOB: &str = "security";
 const SESSION_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 const MIN_PASSWORD_LEN: usize = 6;
+/// `last_used` is updated in memory on every verified request but the blob is
+/// only rewritten this often (a per-request disk write stalls the async
+/// runtime and needlessly wears the disk).
+const KEY_FLUSH_INTERVAL_MS: i64 = 60_000;
 
 #[derive(Default, Serialize, Deserialize)]
 struct SecurityBlob {
     admin_password_hash: Option<String>,
     #[serde(default)]
     api_keys: Vec<ApiKeyRecord>,
+    #[serde(default)]
+    last_key_flush: i64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -227,18 +233,24 @@ impl Security {
         !self.blob.lock().api_keys.is_empty()
     }
 
-    /// Validate a raw bearer key; updates `last_used` and persists on a hit.
+    /// Validate a raw bearer key. `last_used` is updated in memory on every
+    /// hit; the blob is persisted at most once a minute.
     pub fn verify_key(&self, raw: &str) -> bool {
         let hash = sha256_hex(raw);
         let mut guard = self.blob.lock();
         if let Some(rec) = guard.api_keys.iter_mut().find(|k| k.hash == hash) {
             rec.last_used = Some(now_ms());
-            let snapshot = SecurityBlob {
-                admin_password_hash: guard.admin_password_hash.clone(),
-                api_keys: guard.api_keys.clone(),
-            };
-            drop(guard);
-            let _ = self.storage.save_blob(BLOB, &snapshot);
+            let now = now_ms();
+            if now - guard.last_key_flush >= KEY_FLUSH_INTERVAL_MS {
+                guard.last_key_flush = now;
+                let snapshot = SecurityBlob {
+                    admin_password_hash: guard.admin_password_hash.clone(),
+                    api_keys: guard.api_keys.clone(),
+                    last_key_flush: guard.last_key_flush,
+                };
+                drop(guard);
+                let _ = self.storage.save_blob(BLOB, &snapshot);
+            }
             true
         } else {
             false
