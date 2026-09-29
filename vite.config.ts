@@ -20,8 +20,16 @@ export default defineConfig({
     // over from 127.0.0.1:8765 to the dev origin). Point MICLAW_DEV_API at a
     // mock (see ../dev-mock.mjs) for UI work without a real account.
     proxy: {
-      "/api": process.env.MICLAW_DEV_API ?? "http://127.0.0.1:8765",
-      "/v1": process.env.MICLAW_DEV_API ?? "http://127.0.0.1:8765",
+      "/api": {
+        target: process.env.MICLAW_DEV_API ?? "http://127.0.0.1:8765",
+        // Forward the bridge's own Host: the loopback Host guard rejects
+        // requests addressed as localhost:1420.
+        changeOrigin: true,
+      },
+      "/v1": {
+        target: process.env.MICLAW_DEV_API ?? "http://127.0.0.1:8765",
+        changeOrigin: true,
+      },
     },
   },
 });

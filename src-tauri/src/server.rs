@@ -3,7 +3,7 @@ use crate::error::{BridgeError, Result};
 use crate::service::{SendTicketRequest, SetPortRequest, VerifyTicketRequest};
 use crate::state::BridgeState;
 use axum::extract::State;
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -19,7 +19,7 @@ use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -78,6 +78,15 @@ pub async fn start_http(state: Arc<BridgeState>, config: ServerConfig) -> Result
 
     let addr = SocketAddr::new(config.host, config.port);
     let app = router(state.clone());
+    // When bound to loopback, enforce the Host allow-list: CORS cannot see
+    // DNS-rebinding requests (no Origin header), so the Host header is the
+    // only tripwire. Wider binds (LAN/router deployments) are exempt — the
+    // operator explicitly opted into exposure there.
+    let app = if config.host.is_loopback() {
+        app.layer(axum::middleware::from_fn(host_guard))
+    } else {
+        app
+    };
     let handle = Handle::new();
     let tls_enabled = state.storage.settings().tls_enabled;
 
@@ -229,11 +238,90 @@ pub fn router(state: Arc<BridgeState>) -> Router {
         ))
         .with_state(state.proxy.clone());
 
+    // CORS: the WebUI is same-origin and needs nothing; cross-origin browser
+    // access is neither expected nor wanted. Reflect only loopback origins
+    // (plus Tauri webviews such as CC-Switch, whose pages live under
+    // tauri.localhost). Arbitrary internet pages get no CORS headers and can
+    // neither read responses nor pass JSON preflights, so they can no longer
+    // drive the local bridge or burn its quota.
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin, _| origin_allowed(origin)))
+        .allow_methods(AllowMethods::list([
+            Method::GET,
+            Method::POST,
+            Method::DELETE,
+        ]))
+        .allow_headers(AllowHeaders::list([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+            HeaderName::from_static("x-api-key"),
+            HeaderName::from_static("anthropic-version"),
+            HeaderName::from_static("anthropic-beta"),
+            HeaderName::from_static("last-event-id"),
+        ]));
+
     Router::new()
         .merge(api)
         .merge(proxy)
         .fallback(static_asset)
-        .layer(CorsLayer::permissive())
+        .layer(cors)
+}
+
+/// Browser origins allowed to read responses cross-origin. Loopback pages and
+/// Tauri webviews (CC-Switch runs as a Tauri app) keep working; everything
+/// else — i.e. arbitrary internet pages — gets no CORS headers. The WebUI
+/// itself is same-origin and unaffected.
+fn origin_allowed(origin: &HeaderValue) -> bool {
+    let Some(o) = origin.to_str().ok() else {
+        return false;
+    };
+    let Some((_, hostport)) = o.split_once("://") else {
+        return false;
+    };
+    let host = if let Some(rest) = hostport.strip_prefix('[') {
+        rest.split_once(']').map(|(n, _)| n).unwrap_or(rest)
+    } else {
+        hostport.split(':').next().unwrap_or(hostport)
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "tauri.localhost")
+}
+
+/// Reject requests whose Host is not the loopback service itself (applied only
+/// on loopback binds). Kills DNS-rebinding, which CORS cannot see: a rebound
+/// request arrives without an Origin header and would otherwise sail straight
+/// into /v1 and /api under the attacker's origin.
+async fn host_guard(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let ok = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(host_is_allowed)
+        .unwrap_or(false);
+    if ok {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::MISDIRECTED_REQUEST,
+            "unrecognized Host header; access the bridge via 127.0.0.1",
+        )
+            .into_response()
+    }
+}
+
+fn host_is_allowed(host_header: &str) -> bool {
+    let h = host_header.trim();
+    let name = if let Some(rest) = h.strip_prefix('[') {
+        rest.split_once(']').map(|(n, _)| n).unwrap_or(rest)
+    } else if h.matches(':').count() == 1 {
+        h.rsplit_once(':').map(|(n, _)| n).unwrap_or(h)
+    } else {
+        h
+    };
+    matches!(
+        name,
+        "127.0.0.1" | "localhost" | "::1" | "local.miclawbridge.com"
+    )
 }
 
 /// Endpoints reachable without an admin session (so the login UI can work).
@@ -265,6 +353,10 @@ async fn admin_guard(
     next: axum::middleware::Next,
 ) -> Response {
     let path = req.uri().path();
+    // The `!is_configured()` fail-open stays: the CLI drives /api over HTTP
+    // without a session and must keep working pre-setup. The browser attack
+    // vector it once exposed is closed by the CORS allow-list and the Host
+    // guard instead.
     if admin_open_path(path) || !state.security.is_configured() {
         return next.run(req).await;
     }
