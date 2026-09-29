@@ -565,7 +565,12 @@ async fn aggregate_anthropic(
         "content": content,
         "stop_reason": stop_reason,
         "stop_sequence": Value::Null,
-        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+        },
     });
     (StatusCode::OK, Json(payload)).into_response()
 }
@@ -765,7 +770,12 @@ impl SseTranslator {
                     // let the later `message_delta` carry the authoritative
                     // (cumulative) usage. Clients that read message_start for a
                     // token budget will under-count until that delta arrives.
-                    "usage": {"input_tokens": 0, "output_tokens": 0}
+                    "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                }
                 }
             });
             out.push(format_sse("message_start", &evt));
@@ -1007,7 +1017,12 @@ impl SseTranslator {
                     "content": [],
                     "stop_reason": null,
                     "stop_sequence": null,
-                    "usage": {"input_tokens": 0, "output_tokens": 0}
+                    "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                }
                 }
             });
             out.push(format_sse("message_start", &evt));
@@ -1023,6 +1038,8 @@ impl SseTranslator {
             "usage": {
                 "input_tokens": self.state.input_tokens,
                 "output_tokens": self.state.output_tokens,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
             }
         });
         out.push(format_sse("message_delta", &evt));

@@ -135,25 +135,24 @@ async fn run() -> Result<()> {
             password,
             captcha,
         } => {
-            let outcome: LoginOutcome = post_json(
-                &base(base_url)?,
-                "/api/auth/login",
-                &LoginRequest {
-                    account,
-                    password,
-                    captcha,
-                },
-            )
-            .await?;
+            let api = Api::connect(&base(base_url)?).await?;
+            let outcome: LoginOutcome = api
+                .post(
+                    "/api/auth/login",
+                    &LoginRequest {
+                        account,
+                        password,
+                        captcha,
+                    },
+                )
+                .await?;
             print_json(&outcome)
         }
         Command::SendTicket { base_url, flag } => {
-            let sent: bool = post_json(
-                &base(base_url)?,
-                "/api/auth/two-factor/send",
-                &SendTicketRequest { flag },
-            )
-            .await?;
+            let api = Api::connect(&base(base_url)?).await?;
+            let sent: bool = api
+                .post("/api/auth/two-factor/send", &SendTicketRequest { flag })
+                .await?;
             println!(
                 "{}",
                 if sent {
@@ -169,21 +168,21 @@ async fn run() -> Result<()> {
             flag,
             ticket,
         } => {
-            let _: Value = post_json(
-                &base(base_url)?,
-                "/api/auth/two-factor/verify",
-                &VerifyTicketRequest { flag, ticket },
-            )
-            .await?;
+            let api = Api::connect(&base(base_url)?).await?;
+            let _: Value = api
+                .post("/api/auth/two-factor/verify", &VerifyTicketRequest { flag, ticket })
+                .await?;
             println!("verified");
             Ok(())
         }
         Command::Refresh { base_url } => {
-            let auth: AuthSnapshot = post_json(&base(base_url)?, "/api/auth/refresh", &()).await?;
+            let api = Api::connect(&base(base_url)?).await?;
+            let auth: AuthSnapshot = api.post("/api/auth/refresh", &()).await?;
             print_json(&auth)
         }
         Command::Logout { base_url } => {
-            let _: Value = post_json(&base(base_url)?, "/api/auth/logout", &()).await?;
+            let api = Api::connect(&base(base_url)?).await?;
+            let _: Value = api.post("/api/auth/logout", &()).await?;
             println!("logged out");
             Ok(())
         }
@@ -233,9 +232,10 @@ async fn run_server(
 
 async fn status(base_url: Option<String>) -> Result<()> {
     let base = base(base_url)?;
-    match get_json::<ProxySnapshot>(&base, "/api/proxy/status").await {
+    let api = Api::connect(&base).await?;
+    match api.get::<ProxySnapshot>("/api/proxy/status").await {
         Ok(proxy) => {
-            let auth: AuthSnapshot = get_json(&base, "/api/auth/status").await?;
+            let auth: AuthSnapshot = api.get("/api/auth/status").await?;
             println!("server: running");
             println!("webui: {base}");
             println!("proxy: {:?}", proxy);
@@ -250,7 +250,7 @@ async fn status(base_url: Option<String>) -> Result<()> {
                 }
             );
             if auth.authenticated {
-                match get_json::<QuotaSnapshot>(&base, "/api/quota").await {
+                match api.get::<QuotaSnapshot>("/api/quota").await {
                     Ok(quota) => println!(
                         "quota: {}/{} points remaining (used {}, status {})",
                         quota.points_remaining, quota.points_limit, quota.points_used, quota.status
@@ -270,8 +270,8 @@ async fn status(base_url: Option<String>) -> Result<()> {
 }
 
 async fn models(base_url: Option<String>) -> Result<()> {
-    let base = base(base_url)?;
-    let models = match get_json::<Vec<ModelInfo>>(&base, "/api/models").await {
+    let api = Api::connect(&base(base_url)?).await?;
+    let models = match api.get::<Vec<ModelInfo>>("/api/models").await {
         Ok(models) => models,
         Err(_) => known_models(),
     };
@@ -283,16 +283,20 @@ async fn models(base_url: Option<String>) -> Result<()> {
 
 async fn set_port(port: u16, base_url: Option<String>) -> Result<()> {
     if let Some(base_url) = base_url {
-        let snapshot: ProxySnapshot =
-            post_json(&base_url, "/api/settings/port", &SetPortRequest { port }).await?;
+        let api = Api::connect(base_url.trim_end_matches('/')).await?;
+        let snapshot: ProxySnapshot = api
+            .post("/api/settings/port", &SetPortRequest { port })
+            .await?;
         print_json(&snapshot)?;
         println!("restart the server for the new port to take effect");
         return Ok(());
     }
 
     let base = base(None)?;
-    if let Ok(snapshot) =
-        post_json::<ProxySnapshot, _>(&base, "/api/settings/port", &SetPortRequest { port }).await
+    let api = Api::connect(&base).await?;
+    if let Ok(snapshot) = api
+        .post::<ProxySnapshot, _>("/api/settings/port", &SetPortRequest { port })
+        .await
     {
         print_json(&snapshot)?;
         println!("restart the server for the new port to take effect");
@@ -316,21 +320,80 @@ fn base(base_url: Option<String>) -> Result<String> {
     ))
 }
 
-async fn get_json<T: DeserializeOwned>(base: &str, path: &str) -> Result<T> {
-    let url = format!("{base}{path}");
-    let resp = reqwest::get(url).await?;
-    decode_json(resp).await
+/// Thin client for the WebUI control plane. Once an admin password is
+/// configured, every `/api/*` endpoint except the auth ones requires the
+/// `mb_session` cookie; the CLI acquires one transparently from
+/// `MICLAW_ADMIN_PASSWORD` so commands like `status` keep working post-setup
+/// (before that env var existed, a configured bridge simply broke the CLI).
+struct Api {
+    base: String,
+    cookie: Option<String>,
+    client: reqwest::Client,
 }
 
-async fn post_json<T: DeserializeOwned, B: Serialize>(
-    base: &str,
-    path: &str,
-    body: &B,
-) -> Result<T> {
-    let url = format!("{base}{path}");
-    let client = reqwest::Client::new();
-    let resp = client.post(url).json(body).send().await?;
-    decode_json(resp).await
+impl Api {
+    async fn connect(base: &str) -> Result<Self> {
+        let client = reqwest::Client::new();
+        let session: Value = client
+            .get(format!("{base}/api/admin/session"))
+            .send()
+            .await?
+            .json()
+            .await?;
+        let configured = session.get("configured").and_then(|v| v.as_bool()) == Some(true);
+        let cookie = if configured {
+            let password = std::env::var("MICLAW_ADMIN_PASSWORD").map_err(|_| {
+                BridgeError::Other(
+                    "bridge admin password is configured; set MICLAW_ADMIN_PASSWORD to use the CLI against it"
+                        .into(),
+                )
+            })?;
+            let resp = client
+                .post(format!("{base}/api/admin/login"))
+                .json(&serde_json::json!({ "password": password }))
+                .send()
+                .await?;
+            let cookie = resp
+                .headers()
+                .get(reqwest::header::SET_COOKIE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split(';').next())
+                .map(|s| s.trim().to_string())
+                .ok_or_else(|| {
+                    BridgeError::Other("admin login did not return a session cookie".into())
+                })?;
+            let status = resp.status();
+            if !status.is_success() {
+                return Err(BridgeError::Other(format!(
+                    "admin login failed (http {status}); check MICLAW_ADMIN_PASSWORD"
+                )));
+            }
+            Some(cookie)
+        } else {
+            None
+        };
+        Ok(Self {
+            base: base.to_string(),
+            cookie,
+            client,
+        })
+    }
+
+    async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+        let mut req = self.client.get(format!("{}{path}", self.base));
+        if let Some(c) = &self.cookie {
+            req = req.header(reqwest::header::COOKIE, c);
+        }
+        decode_json(req.send().await?).await
+    }
+
+    async fn post<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
+        let mut req = self.client.post(format!("{}{path}", self.base)).json(body);
+        if let Some(c) = &self.cookie {
+            req = req.header(reqwest::header::COOKIE, c);
+        }
+        decode_json(req.send().await?).await
+    }
 }
 
 async fn decode_json<T: DeserializeOwned>(resp: reqwest::Response) -> Result<T> {
