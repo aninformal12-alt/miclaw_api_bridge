@@ -340,6 +340,56 @@ fn chat_stream_normalized(
                 let Ok(v) = serde_json::from_str::<Value>(&payload) else {
                     continue;
                 };
+                // Business errors hide inside 200 streams as error objects or
+                // non-zero codes with no choices; surface them instead of
+                // replying "successfully" with empty content.
+                let in_stream_error = if let Some(err) = v.get("error") {
+                    Some(
+                        err.get("message")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("upstream returned an error inside a successful stream")
+                            .to_string(),
+                    )
+                } else {
+                    match v.get("code").and_then(|x| x.as_i64()) {
+                        Some(c) if c != 0 => Some(
+                            v.get("message")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("upstream rejected the request")
+                                .to_string(),
+                        ),
+                        _ => None,
+                    }
+                };
+                if let Some(message) = in_stream_error {
+                    tracing::warn!(
+                        target = "proxy",
+                        "chat stream: in-stream upstream error: {message}"
+                    );
+                    let _ = send_data(
+                        &tx,
+                        &json!({
+                            "error": {
+                                "type": "upstream_error",
+                                "code": "in_stream_error",
+                                "message": message,
+                            }
+                        }),
+                    )
+                    .await;
+                    if ctrl.verbose() {
+                        emit_log(
+                            &ctrl,
+                            json!({
+                                "ts": chrono::Utc::now().timestamp_millis(),
+                                "kind": "error",
+                                "path": crate::mimo::PATH_CHAT,
+                                "message": message,
+                            }),
+                        );
+                    }
+                    return;
+                }
                 if let Some(u) = v.get("usage") {
                     if !u.is_null() {
                         usage_val = Some(u.clone());
@@ -1035,6 +1085,43 @@ fn message_from_input_item(item: &Value) -> Option<Value> {
             .get("text")
             .and_then(|v| v.as_str())
             .map(|text| json!({"role": "user", "content": text}));
+    }
+    // Responses-compat: a model tool call becomes an assistant message with
+    // tool_calls and its output becomes a tool message. Both used to fall
+    // through to the generic branch and collapse into empty user turns,
+    // destroying multi-turn tool use on this path. Reasoning items are
+    // dropped outright (mimo does not persist reasoning across turns).
+    if typ == Some("function_call") {
+        return Some(json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{
+                "id": obj.get("call_id").and_then(|v| v.as_str()).unwrap_or(""),
+                "type": "function",
+                "function": {
+                    "name": obj.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                    "arguments": obj
+                        .get("arguments")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("{}"),
+                }
+            }]
+        }));
+    }
+    if typ == Some("function_call_output") {
+        let content = match obj.get("output") {
+            Some(Value::String(s)) => Value::String(s.clone()),
+            Some(other) => chat_content_from_responses_content(other, true),
+            None => Value::String(String::new()),
+        };
+        return Some(json!({
+            "role": "tool",
+            "tool_call_id": obj.get("call_id").and_then(|v| v.as_str()).unwrap_or(""),
+            "content": content,
+        }));
+    }
+    if typ == Some("reasoning") {
+        return None;
     }
 
     let role = obj

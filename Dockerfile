@@ -25,7 +25,8 @@ RUN cargo build --release --bin miclaw_api_bridge
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates libdbus-1-3 \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --system --uid 10001 --home-dir /app --create-home miclaw
 
 ENV MICLAW_API_BRIDGE_DISABLE_KEYRING=1 \
   RUST_LOG=miclaw_api_bridge_lib=info \
@@ -36,8 +37,13 @@ ENV MICLAW_API_BRIDGE_DISABLE_KEYRING=1 \
 WORKDIR /app
 COPY --from=builder /app/src-tauri/target/release/miclaw_api_bridge /usr/local/bin/miclaw_api_bridge
 
+# /data must be writable by the runtime user; named volumes inherit this
+# ownership on first use. Bind-mount users: chown the host dir to 10001.
+RUN mkdir -p /data/config /data/data && chown -R miclaw:miclaw /data
+
 VOLUME ["/data"]
 EXPOSE 8765
+USER miclaw
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD miclaw_api_bridge status --base-url http://127.0.0.1:8765 >/dev/null || exit 1
 
