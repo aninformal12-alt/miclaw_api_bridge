@@ -219,6 +219,10 @@ pub fn router(state: Arc<BridgeState>) -> Router {
         .route("/v1/chat/completions", post(crate::proxy::openai::chat))
         .route("/v1/responses", post(crate::proxy::openai::responses))
         .route("/v1/messages", post(crate::proxy::anthropic::messages))
+        .route(
+            "/v1/messages/count_tokens",
+            post(crate::proxy::anthropic::count_tokens),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api_key_guard,
@@ -375,7 +379,7 @@ async fn api_key_guard(
     if !state.storage.settings().api_key_required {
         return next.run(req).await;
     }
-    let ok = req
+    let provided = req
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -383,7 +387,19 @@ async fn api_key_guard(
             s.strip_prefix("Bearer ")
                 .or_else(|| s.strip_prefix("bearer "))
         })
-        .map(|key| state.security.verify_key(key.trim()))
+        .map(str::trim)
+        .map(str::to_string)
+        // Anthropic-native clients (e.g. Claude Code with ANTHROPIC_API_KEY)
+        // send the key in `x-api-key` instead of an Authorization header.
+        .or_else(|| {
+            req.headers()
+                .get("x-api-key")
+                .and_then(|v| v.to_str().ok())
+                .map(str::trim)
+                .map(str::to_string)
+        });
+    let ok = provided
+        .map(|key| state.security.verify_key(&key))
         .unwrap_or(false);
     if ok {
         next.run(req).await
@@ -392,7 +408,7 @@ async fn api_key_guard(
             StatusCode::UNAUTHORIZED,
             Json(json!({
                 "error": {
-                    "type": "invalid_request_error",
+                    "type": "authentication_error",
                     "message": "invalid or missing API key",
                 }
             })),

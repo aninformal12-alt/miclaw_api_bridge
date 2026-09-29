@@ -11,9 +11,13 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub fn map_err(e: BridgeError) -> Response {
+    // 401 is reserved for client-facing key failures (api_key_guard). Xiaomi
+    // session problems are reported as 502 so proxy clients never blame their
+    // own credentials and drop into their login flows.
     let (code, kind) = match &e {
-        BridgeError::NotAuthenticated => (StatusCode::UNAUTHORIZED, "not_authenticated"),
-        BridgeError::Login(_) => (StatusCode::UNAUTHORIZED, "login_failed"),
+        BridgeError::NotAuthenticated | BridgeError::Login(_) => {
+            (StatusCode::BAD_GATEWAY, "upstream_auth_required")
+        }
         _ => (StatusCode::BAD_GATEWAY, "upstream_error"),
     };
     let body = Json(json!({

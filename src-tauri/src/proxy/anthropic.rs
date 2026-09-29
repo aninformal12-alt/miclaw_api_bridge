@@ -16,7 +16,6 @@
 //!   openai.chunk.delta.tool_calls    -> content_block_start/delta {tool_use, input_json_delta}
 //!   openai.chunk.finish_reason       -> message_delta with stop_reason
 
-use super::transport::map_err;
 use super::ProxyController;
 use crate::error::BridgeError;
 use axum::{
@@ -52,7 +51,7 @@ pub async fn messages(
 
     let openai_body = match anthropic_to_openai_chat(&body) {
         Ok(v) => v,
-        Err(e) => return map_err(BridgeError::Proxy(e)),
+        Err(e) => return anthropic_error_response(&BridgeError::Proxy(e)),
     };
 
     // Always stream from the upstream (see chat_completions in openai.rs):
@@ -104,7 +103,7 @@ pub async fn messages(
             );
             if !status.is_success() {
                 let text = upstream.text().await.unwrap_or_default();
-                return (status, text).into_response();
+                return upstream_error_response(status, text);
             }
             if stream_requested {
                 stream_anthropic(upstream, model, ctrl.usage.clone(), thinking_enabled)
@@ -123,8 +122,100 @@ pub async fn messages(
                     "elapsed_ms": started.elapsed().as_millis() as u64,
                 }),
             );
-            map_err(e)
+            anthropic_error_response(&e)
         }
+    }
+}
+
+/// Wrap a bridge-side failure in the Anthropic error envelope. Bridge/upstream
+/// auth problems deliberately map to 502 instead of 401/403: a 401/403 from
+/// the Messages API makes clients like Claude Code believe *their* credentials
+/// are wrong and drop into a login flow, even though the real problem is the
+/// Xiaomi session inside the bridge.
+fn anthropic_error_response(e: &BridgeError) -> Response {
+    let (status, kind) = match e {
+        BridgeError::Proxy(_) => (StatusCode::BAD_REQUEST, "invalid_request_error"),
+        _ => (StatusCode::BAD_GATEWAY, "api_error"),
+    };
+    let message = match e {
+        BridgeError::NotAuthenticated => {
+            "Xiaomi session in the bridge is not authenticated; re-login in the bridge WebUI"
+                .to_string()
+        }
+        _ => e.to_string(),
+    };
+    (
+        status,
+        Json(json!({
+            "type": "error",
+            "error": {"type": kind, "message": message},
+        })),
+    )
+        .into_response()
+}
+
+/// Convert a non-2xx upstream response into an Anthropic-shaped error. 401/403
+/// are re-reported as 502 for the same reason as `anthropic_error_response`;
+/// the raw Xiaomi body is never passed through unwrapped.
+fn upstream_error_response(status: StatusCode, body_text: String) -> Response {
+    let parsed: Value = serde_json::from_str(&body_text).unwrap_or(Value::Null);
+    let extracted = parsed
+        .get("error")
+        .cloned()
+        .unwrap_or_else(|| parsed.get("message").cloned().unwrap_or(Value::Null));
+    let message = match extracted {
+        Value::String(s) => s,
+        Value::Object(o) => o
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("upstream error")
+            .to_string(),
+        _ => {
+            let t: String = body_text.chars().take(300).collect();
+            if t.is_empty() {
+                format!("upstream returned HTTP {}", status.as_u16())
+            } else {
+                t
+            }
+        }
+    };
+    let (code, kind) = match status.as_u16() {
+        401 | 403 => (StatusCode::BAD_GATEWAY, "api_error"),
+        429 => (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error"),
+        400 | 404 | 413 | 422 => (
+            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_REQUEST),
+            "invalid_request_error",
+        ),
+        _ => (StatusCode::BAD_GATEWAY, "api_error"),
+    };
+    (
+        code,
+        Json(json!({
+            "type": "error",
+            "error": {"type": kind, "message": message},
+        })),
+    )
+        .into_response()
+}
+
+/// Local input-token estimate for Anthropic `count_tokens`. Claude Code calls
+/// this on startup and before large requests; there is no tokenizer here, so a
+/// chars/3 heuristic over the request JSON is plenty for context budgeting.
+pub async fn count_tokens(Json(body): Json<Value>) -> Response {
+    let chars = count_content_chars(&body);
+    Json(json!({ "input_tokens": (chars / 3).max(1) })).into_response()
+}
+
+fn count_content_chars(v: &Value) -> usize {
+    match v {
+        Value::String(s) => s.chars().count(),
+        Value::Array(items) => items.iter().map(count_content_chars).sum(),
+        Value::Object(map) => map
+            .iter()
+            .filter(|(k, _)| !matches!(k.as_str(), "stream" | "model" | "metadata"))
+            .map(|(_, v)| count_content_chars(v))
+            .sum(),
+        _ => 0,
     }
 }
 
