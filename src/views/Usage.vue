@@ -209,17 +209,67 @@ function fmtInt(n: number): string {
 }
 
 // ---- data ---------------------------------------------------------------
-async function load() {
-  loading.value = true;
-  error.value = "";
+// The page auto-refreshes silently while visible: numbers and bars update in
+// place (no skeleton flash), a small status dot shows freshness, and polling
+// pauses when the tab is hidden. Switching window/metric still refetches
+// immediately on click.
+const REFRESH_MS = 15_000;
+let timer: number | null = null;
+const refreshing = ref(false);
+const refreshFailed = ref(false);
+const lastUpdated = ref<Date | null>(null);
+
+async function load(silent = false) {
+  if (silent) {
+    refreshing.value = true;
+  } else {
+    loading.value = true;
+    error.value = "";
+  }
   try {
     report.value = await api.usage(win.value);
+    refreshFailed.value = false;
+    lastUpdated.value = new Date();
   } catch (e: any) {
-    error.value = e?.message ?? String(e);
+    if (silent) {
+      refreshFailed.value = true;
+    } else {
+      error.value = e?.message ?? String(e);
+    }
   } finally {
     loading.value = false;
+    refreshing.value = false;
   }
 }
+
+function startPolling() {
+  stopPolling();
+  timer = window.setInterval(() => {
+    if (document.visibilityState === "visible") load(true);
+  }, REFRESH_MS);
+}
+
+function stopPolling() {
+  if (timer !== null) {
+    window.clearInterval(timer);
+    timer = null;
+  }
+}
+
+function onVisibility() {
+  if (document.visibilityState === "visible") {
+    load(true); // catch up immediately after returning to the tab
+    startPolling();
+  } else {
+    stopPolling();
+  }
+}
+
+const lastUpdatedLabel = computed(() =>
+  lastUpdated.value
+    ? `每 15 秒自动更新 · 最后更新 ${lastUpdated.value.toLocaleTimeString("zh-CN", { hour12: false })}`
+    : "每 15 秒自动更新",
+);
 
 function setWindow(w: Win) {
   if (win.value === w) return;
@@ -233,9 +283,13 @@ onMounted(() => {
   measure();
   ro = new ResizeObserver(() => measure());
   if (chartWrap.value) ro.observe(chartWrap.value);
+  startPolling();
+  document.addEventListener("visibilitychange", onVisibility);
 });
 
 onBeforeUnmount(() => {
+  stopPolling();
+  document.removeEventListener("visibilitychange", onVisibility);
   ro?.disconnect();
   ro = null;
 });
@@ -276,6 +330,13 @@ onBeforeUnmount(() => {
         </p>
       </div>
       <div class="usage-controls">
+        <span
+          class="refresh-dot"
+          :class="{ busy: refreshing, failed: refreshFailed }"
+          :title="lastUpdatedLabel"
+          role="status"
+          :aria-label="lastUpdatedLabel"
+        ></span>
         <div class="seg" role="group" aria-label="统计指标">
           <button
             v-for="m in METRICS"
@@ -403,8 +464,34 @@ onBeforeUnmount(() => {
 }
 .usage-controls {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.refresh-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+  transition: background 0.2s ease;
+}
+.refresh-dot.busy {
+  background: var(--accent);
+  animation: refresh-pulse 1s ease infinite;
+}
+.refresh-dot.failed {
+  background: var(--bad);
+}
+@keyframes refresh-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .chart-wrap {

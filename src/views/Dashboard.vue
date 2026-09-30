@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { api, AuthSnapshot, ModelInfo, ProxySnapshot, QuotaSnapshot } from "../api";
 
@@ -51,18 +51,23 @@ async function loadQuota() {
   quota.value = auth.value?.authenticated ? await api.quota() : null;
 }
 
-async function refreshAll() {
-  err.value = "";
+async function refreshAll(silent = false) {
+  if (!silent) err.value = "";
   try {
-    auth.value = await api.authStatus();
-    proxy.value = await api.proxyStatus();
-    models.value = await api.listModels();
+    const [authS, proxyS, modelsS] = await Promise.all([
+      api.authStatus(),
+      api.proxyStatus(),
+      api.listModels(),
+    ]);
+    auth.value = authS;
+    proxy.value = proxyS;
+    models.value = modelsS;
     portInput.value = proxy.value.port;
     await loadQuota().catch(() => {
       quota.value = null;
     });
   } catch (e: any) {
-    err.value = e?.message ?? String(e);
+    if (!silent) err.value = e?.message ?? String(e);
   }
 }
 
@@ -111,7 +116,46 @@ async function logout() {
   await refreshAll();
 }
 
-onMounted(refreshAll);
+// Silent auto-refresh while the tab is visible: quota / service / account
+// status stay current without any manual action. Pauses when hidden, catches
+// up immediately on return; silent passes don't clobber the error banner and
+// skip while a button action is in flight.
+const REFRESH_MS = 15_000;
+let pollTimer: number | null = null;
+
+function startPolling() {
+  stopPolling();
+  pollTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible" && !busy.value) refreshAll(true);
+  }, REFRESH_MS);
+}
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function onVisibility() {
+  if (document.visibilityState === "visible") {
+    refreshAll(true);
+    startPolling();
+  } else {
+    stopPolling();
+  }
+}
+
+onMounted(() => {
+  refreshAll();
+  startPolling();
+  document.addEventListener("visibilitychange", onVisibility);
+});
+
+onBeforeUnmount(() => {
+  stopPolling();
+  document.removeEventListener("visibilitychange", onVisibility);
+});
 </script>
 
 <template>
