@@ -232,6 +232,11 @@ pub fn router(state: Arc<BridgeState>) -> Router {
             "/v1/messages/count_tokens",
             post(crate::proxy::anthropic::count_tokens),
         )
+        // The axum default caps JSON bodies at 2MiB, which long agent
+        // conversations (Claude Code, ZCode with big contexts) blow past.
+        // mimo advertises 1M-token contexts (~4MiB of text alone, before
+        // tool schemas and history); 32MiB leaves generous headroom.
+        .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api_key_guard,

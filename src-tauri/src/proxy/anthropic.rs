@@ -182,6 +182,8 @@ fn upstream_error_response(status: StatusCode, body_text: String) -> Response {
     let (code, kind) = match status.as_u16() {
         401 | 403 => (StatusCode::BAD_GATEWAY, "api_error"),
         429 => (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error"),
+        // 413 stays 413 (the client really did send too much); the rest keep
+        // their upstream status as client errors.
         400 | 404 | 413 | 422 => (
             StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_REQUEST),
             "invalid_request_error",
