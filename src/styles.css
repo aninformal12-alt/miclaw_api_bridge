@@ -861,6 +861,10 @@ select:focus {
   /* Equal card heights: the account card pins its action row to the bottom
      so the pair doesn't leave a ragged hole next to the taller protocol card. */
   align-items: stretch;
+  /* Cards inside the grid have margin-bottom: 0 (the grid gap handles inner
+     spacing), so without this the section sits flush against the next card
+     and their shadows merge into one blob. */
+  margin-bottom: 16px;
 }
 
 .account-card {
