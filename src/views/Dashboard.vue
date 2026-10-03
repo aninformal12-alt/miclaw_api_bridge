@@ -227,27 +227,34 @@ onBeforeUnmount(() => {
   </section>
 
   <section class="login-grid">
-    <article class="card">
+    <article class="card account-card">
       <h2 class="card-title">账号</h2>
       <p class="card-desc">serviceToken 过期时会自动刷新，也可以手动触发。</p>
-      <div class="account-row" style="margin-bottom: 12px">
-        <span :class="['pill', auth?.authenticated ? 'ok' : 'bad']">
+      <div class="account-actions">
+        <span
+          :class="['pill', auth?.authenticated ? 'ok' : 'bad']"
+          :title="
+            auth?.refreshed_at
+              ? `令牌更新于 ${new Date(auth.refreshed_at).toLocaleString('zh-CN', { hour12: false })}`
+              : '尚未认证'
+          "
+        >
           {{ auth?.authenticated ? "已认证" : "未认证" }}
         </span>
-      </div>
-      <div class="account-row">
-        <button class="btn btn-secondary btn-sm" :disabled="busy || !auth?.authenticated" @click="refreshAuth">
-          刷新令牌
-        </button>
-        <button class="btn btn-secondary btn-sm" :disabled="busy || !auth?.authenticated" @click="refreshQuota">
-          刷新额度
-        </button>
-        <button class="btn btn-danger btn-sm" :disabled="busy || !auth?.authenticated" @click="logout">
-          退出登录
-        </button>
-      </div>
-      <div v-if="!auth?.authenticated" style="margin-top: 14px">
-        <RouterLink class="btn btn-primary" to="/login">去登录</RouterLink>
+        <div class="account-buttons">
+          <template v-if="auth?.authenticated">
+            <button class="btn btn-secondary btn-sm" :disabled="busy" @click="refreshAuth">
+              刷新令牌
+            </button>
+            <button class="btn btn-secondary btn-sm" :disabled="busy" @click="refreshQuota">
+              刷新额度
+            </button>
+            <button class="btn btn-danger btn-sm" :disabled="busy" @click="logout">
+              退出登录
+            </button>
+          </template>
+          <RouterLink v-else class="btn btn-primary btn-sm" to="/login">去登录</RouterLink>
+        </div>
       </div>
     </article>
 
