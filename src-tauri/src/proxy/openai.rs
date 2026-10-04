@@ -845,11 +845,29 @@ pub async fn responses(
         .post_json(crate::mimo::PATH_RESPONSES, body.clone())
         .await
     {
-        Ok(upstream) if upstream.status() == reqwest::StatusCode::NOT_FOUND => {
-            let _ = upstream.bytes().await;
+        Ok(upstream)
+            if matches!(
+                upstream.status(),
+                reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::BAD_REQUEST
+            ) =>
+        {
+            // 404: the channel has no native responses endpoint at all.
+            // 400: the endpoint exists but rejects this exact history shape —
+            // in practice Codex sessions can carry items the native endpoint
+            // is strict about (e.g. a dangling function_call left by an
+            // interrupted turn). Either way the chat-compat translation is
+            // more forgiving, so degrade instead of failing the client.
+            let status = upstream.status();
+            let preview = upstream
+                .text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect::<String>();
             tracing::info!(
                 target = "proxy",
-                "upstream responses endpoint 404; falling back to chat-completions compat"
+                "upstream responses endpoint rejected ({status}: {preview}); falling back to chat-completions compat"
             );
             emit_log(
                 &ctrl,
@@ -857,7 +875,7 @@ pub async fn responses(
                     "ts": chrono::Utc::now().timestamp_millis(),
                     "kind": "response",
                     "path": crate::mimo::PATH_RESPONSES,
-                    "status": 404,
+                    "status": status.as_u16(),
                     "elapsed_ms": started.elapsed().as_millis() as u64,
                 }),
             );
