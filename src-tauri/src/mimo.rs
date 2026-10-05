@@ -272,10 +272,11 @@ pub struct MimoClient {
     client: reqwest::Client,
 }
 
-/// Total ceiling for one upstream call, generous because streamed
-/// completions legitimately run for minutes (the old blanket 30s timeout
-/// killed any generation slower than that — the dominant source of
-/// "error sending request … 30000ms" failures). Override with
+/// Total ceiling for one upstream call. Generous, because two workloads
+/// legitimately run long: streamed completions can go for many minutes, and
+/// Codex-style context compaction feeds ~900k-token histories to the
+/// summarizer (the old blanket 30s, and later 600s, timeouts killed those
+/// mid-flight — the client then hung on a dead stream). Override with
 /// `MIMO_UPSTREAM_TIMEOUT_SECS`; connect has its own much tighter timeout.
 fn upstream_timeout() -> Duration {
     std::env::var("MIMO_UPSTREAM_TIMEOUT_SECS")
@@ -283,7 +284,7 @@ fn upstream_timeout() -> Duration {
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|&s| s > 0)
         .map(Duration::from_secs)
-        .unwrap_or(Duration::from_secs(600))
+        .unwrap_or(Duration::from_secs(3600))
 }
 
 fn build_mimo_client() -> Result<reqwest::Client> {
