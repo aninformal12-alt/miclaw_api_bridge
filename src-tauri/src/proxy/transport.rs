@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use futures_util::StreamExt;
+use futures::StreamExt;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -239,7 +239,7 @@ pub async fn proxy_response_tapped(
 
     let scanner = crate::usage::UsageScanner::new(is_sse);
     let upstream_stream = upstream.bytes_stream();
-    let body_stream = futures_util::stream::unfold(
+    let body_stream = futures::stream::unfold(
         (upstream_stream, Some(scanner), ctrl, model),
         |(mut stream, mut scanner, ctrl, model)| async move {
             match stream.next().await {

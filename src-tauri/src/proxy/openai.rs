@@ -11,7 +11,7 @@ use axum::{
     Json,
 };
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures::StreamExt;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -513,7 +513,7 @@ fn chat_stream_normalized(
     });
 
     let body_stream =
-        futures_util::stream::unfold(rx, |mut rx| async { rx.recv().await.map(|i| (i, rx)) });
+        futures::stream::unfold(rx, |mut rx| async { rx.recv().await.map(|i| (i, rx)) });
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
@@ -1343,7 +1343,7 @@ fn response_output(msg_id: &str, text: &str, reasoning: &str) -> Vec<Value> {
     output
 }
 
-fn usage_from_chat(usage: Option<&Value>, reasoning: &str) -> Value {
+fn usage_from_chat(usage: Option<&Value>, _reasoning: &str) -> Value {
     let prompt = usage
         .and_then(|u| u.get("prompt_tokens"))
         .and_then(|v| v.as_i64())
@@ -1361,7 +1361,9 @@ fn usage_from_chat(usage: Option<&Value>, reasoning: &str) -> Value {
         "input_tokens_details": {"cached_tokens": 0},
         "output_tokens": completion,
         "output_tokens_details": {
-            "reasoning_tokens": if reasoning.is_empty() { 0 } else { completion },
+            // Upstream reports no reasoning/output split; 0 is the honest
+            // value (previously this claimed ALL output tokens were reasoning).
+            "reasoning_tokens": 0,
         },
         "total_tokens": total,
     })
@@ -1673,7 +1675,7 @@ async fn responses_stream_from_chat(
         .await;
     });
 
-    let body_stream = futures_util::stream::unfold(rx, |mut rx| async {
+    let body_stream = futures::stream::unfold(rx, |mut rx| async {
         rx.recv().await.map(|item| (item, rx))
     });
     let mut headers = HeaderMap::new();

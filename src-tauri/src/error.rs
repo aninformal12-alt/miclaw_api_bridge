@@ -15,20 +15,11 @@ pub enum BridgeError {
     #[error("login: {0}")]
     Login(String),
 
-    #[error("two-factor required")]
-    TwoFactorRequired,
-
     #[error("verification code error")]
     VerificationCodeError,
 
     #[error("not authenticated")]
     NotAuthenticated,
-
-    #[error("companion offline")]
-    CompanionOffline,
-
-    #[error("companion error: {0}")]
-    Companion(String),
 
     #[error("proxy: {0}")]
     Proxy(String),
@@ -43,12 +34,6 @@ pub enum BridgeError {
 impl BridgeError {
     pub fn other<E: std::fmt::Display>(e: E) -> Self {
         Self::Other(e.to_string())
-    }
-}
-
-impl From<anyhow::Error> for BridgeError {
-    fn from(e: anyhow::Error) -> Self {
-        BridgeError::Other(e.to_string())
     }
 }
 

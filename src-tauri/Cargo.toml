@@ -24,9 +24,7 @@ image = { version = "0.25", optional = true, default-features = false, features 
 
 # async runtime
 tokio = { version = "1.41", features = ["full"] }
-tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
-futures-util = "0.3"
 
 # http client / cookies
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "cookies", "gzip"] }
@@ -41,9 +39,7 @@ axum-server = { version = "0.7", default-features = false, features = ["tls-rust
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 # self-signed cert generation; ring backend to match the single provider.
 rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
-tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
-hyper = "1.5"
 
 # json / serde
 serde = { version = "1.0", features = ["derive"] }
@@ -65,7 +61,6 @@ directories = "5.0"
 
 # misc
 thiserror = "2.0"
-anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.11", features = ["v4"] }

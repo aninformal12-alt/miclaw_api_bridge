@@ -1,5 +1,4 @@
 use super::{strip_prefix, AuthState, LoginFlowContext, Session, SERVICE_LOGIN_AUTH2_URL};
-use crate::auth::two_factor::extract_query_param;
 use crate::error::{BridgeError, Result};
 use crate::storage::Storage;
 use md5::{Digest, Md5};
@@ -171,7 +170,6 @@ pub async fn login(
                 ));
             }
 
-            let context = extract_query_param(url, "context").map(|s| s.to_string());
             let mut guard = state.write();
             guard.flow = LoginFlowContext {
                 identity_session: id_session,
@@ -183,7 +181,6 @@ pub async fn login(
                 pending_account: Some(req.account.clone()),
                 pending_password_hash: Some(hash.clone()),
             };
-            let _ = context;
             return Ok(LoginOutcome::TwoFactorRequired { options });
         }
     }

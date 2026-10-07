@@ -220,14 +220,3 @@ pub async fn verify_ticket(
     }
     Ok(())
 }
-
-pub fn extract_query_param<'a>(url: &'a str, key: &str) -> Option<&'a str> {
-    let q = url.split_once('?').map(|x| x.1)?;
-    for kv in q.split('&') {
-        let (k, v) = kv.split_once('=')?;
-        if k == key {
-            return Some(v);
-        }
-    }
-    None
-}

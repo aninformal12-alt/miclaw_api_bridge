@@ -33,11 +33,6 @@ pub const PATH_RESPONSES: &str =
 /// Commercialization quota used by Super XiaoAI's expert-mode UI.
 pub const PATH_QUOTA: &str = "/osbot/pc/user/v2/status?bizId=xiaoai_pc&featureId=common";
 
-/// MCP host service exposed by miclaw PC. Out of scope for the bridge today;
-/// kept here so we don't accidentally collide with it.
-#[allow(dead_code)]
-pub const PATH_MCP_STREAMABLE: &str = "/osbot/pc/mcp/v1/streamable";
-
 /// Default model selected by the migrated official desktop client.
 pub const MODEL_DEFAULT: &str = "xiaomi/mimo-pro";
 

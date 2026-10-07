@@ -10,7 +10,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
-use futures_util::stream::{self, Stream};
+use futures::stream::{self, Stream};
 use rust_embed::RustEmbed;
 use serde::Serialize;
 use serde_json::json;
