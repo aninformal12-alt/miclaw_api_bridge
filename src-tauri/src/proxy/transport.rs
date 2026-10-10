@@ -280,3 +280,99 @@ pub async fn proxy_response_tapped(
     *resp.headers_mut() = headers;
     resp
 }
+
+/// Like `proxy_response_tapped`, but for the native Responses passthrough:
+/// watches for the protocol's terminal event (`response.completed` /
+/// `response.failed` / `response.incomplete`) and fabricates a
+/// `response.failed` if the upstream connection dies without one. Without
+/// this a truncated upstream stream reaches Codex as "stream closed before
+/// response.completed" — after a full (possibly huge) prefill was already
+/// paid for, and typically followed by a retry storm.
+pub async fn proxy_responses_tapped(
+    ctrl: Arc<ProxyController>,
+    model: String,
+    upstream: reqwest::Response,
+) -> Response {
+    let status =
+        StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
+    let is_sse = content_type
+        .as_ref()
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.contains("event-stream"))
+        .unwrap_or(false);
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        content_type.unwrap_or_else(|| header::HeaderValue::from_static("application/json")),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-cache"),
+    );
+
+    if !is_sse {
+        // Non-streaming: nothing to terminate, the JSON body is complete.
+        return proxy_response_tapped(ctrl, model, upstream).await;
+    }
+
+    let upstream_stream = upstream.bytes_stream();
+
+    fn failed_tail() -> bytes::Bytes {
+        bytes::Bytes::from(format!(
+            "event: response.failed\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.failed",
+                "response": {
+                    "id": "resp_upstream_error",
+                    "status": "failed",
+                    "error": {
+                        "code": "upstream_stream_error",
+                        "message": "upstream stream ended before completion"
+                    }
+                }
+            })
+        ))
+    }
+
+    let body_stream = futures::stream::unfold(
+        (upstream_stream, false, false),
+        |(mut stream, saw_terminal, tail_sent)| async move {
+            match stream.next().await {
+                Some(Ok(bytes)) => {
+                    let mut saw_terminal = saw_terminal;
+                    if !saw_terminal {
+                        let text = String::from_utf8_lossy(&bytes);
+                        if text.contains("response.completed")
+                            || text.contains("response.failed")
+                            || text.contains("response.incomplete")
+                        {
+                            saw_terminal = true;
+                        }
+                    }
+                    Some((Ok::<_, std::io::Error>(bytes), (stream, saw_terminal, tail_sent)))
+                }
+                Some(Err(e)) => {
+                    if !saw_terminal && !tail_sent {
+                        Some((Ok(failed_tail()), (stream, true, true)))
+                    } else {
+                        Some((Err(std::io::Error::other(e)), (stream, saw_terminal, tail_sent)))
+                    }
+                }
+                None => {
+                    if !saw_terminal && !tail_sent {
+                        Some((Ok(failed_tail()), (stream, true, true)))
+                    } else {
+                        None
+                    }
+                }
+            }
+        },
+    );
+
+    let mut resp = Response::new(Body::from_stream(body_stream));
+    *resp.status_mut() = status;
+    *resp.headers_mut() = headers;
+    resp
+}

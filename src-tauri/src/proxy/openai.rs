@@ -1,5 +1,5 @@
 use super::transport::{
-    emit_log, list_models, map_err, proxy_response, proxy_response_tapped,
+    emit_log, list_models, map_err, proxy_response, proxy_responses_tapped,
 };
 use super::ProxyController;
 use crate::decode::Utf8Stream;
@@ -898,7 +898,7 @@ pub async fn responses(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            proxy_response_tapped(ctrl, model, upstream).await
+            proxy_responses_tapped(ctrl, model, upstream).await
         }
         Err(e) => {
             emit_log(
@@ -1404,6 +1404,16 @@ async fn responses_stream_from_chat(
         let mut reasoning_closed = false;
         let mut message_opened = false;
         let mut msg_index = 0_i64;
+        // Tool calls are accumulated per index and emitted as a function_call
+        // output item when the stream ends. Previously they were dropped
+        // entirely on this path, so a tool-use turn produced a stream with no
+        // content and no terminal function_call — the client saw an empty,
+        // effectively broken response.
+        let mut tools: std::collections::BTreeMap<i64, ToolAcc> = std::collections::BTreeMap::new();
+        let mut tools_emitted = false;
+        // Function_call items as emitted, reused for the final output array so
+        // the terminal event matches the streamed items.
+        let mut tool_items: Vec<Value> = Vec::new();
 
         send_event(
             &tx,
@@ -1442,14 +1452,25 @@ async fn responses_stream_from_chat(
 
         while let Some(chunk) = stream.next().await {
             let Ok(chunk) = chunk else {
+                // Upstream died mid-stream. Emit the terminal event too: the
+                // Responses protocol requires a response.failed/completed to
+                // close the stream, and clients (Codex via CC Switch) sit on
+                // an unterminated stream until they time out and retry the
+                // whole — very expensive — request.
                 send_event(
                     &tx,
-                    json!({
-                        "type": "error",
-                        "code": "upstream_stream_error",
-                        "message": "upstream stream ended with an error",
-                        "sequence_number": seq,
-                    }),
+                    response_event(
+                        "response.failed",
+                        seq,
+                        "failed",
+                        &response_id,
+                        created_at,
+                        model.clone(),
+                        Vec::new(),
+                        "",
+                        Value::Null,
+                        &request,
+                    ),
                 )
                 .await;
                 return;
@@ -1569,7 +1590,113 @@ async fn responses_stream_from_chat(
                     .await;
                     seq += 1;
                 }
+                if let Some(arr) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+                    for tc in arr {
+                        let idx = tc.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let entry = tools.entry(idx).or_default();
+                        if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                            if !id.is_empty() {
+                                entry.id = id.to_string();
+                            }
+                        }
+                        if let Some(f) = tc.get("function") {
+                            if let Some(name) = f.get("name").and_then(|v| v.as_str()) {
+                                if !name.is_empty() {
+                                    entry.name = name.to_string();
+                                }
+                            }
+                            if let Some(args) = f.get("arguments").and_then(|v| v.as_str()) {
+                                entry.args.push_str(args);
+                            }
+                        }
+                    }
+                }
             }
+        }
+
+        // Emit accumulated tool calls as function_call items. A tool-use turn
+        // carries its verdict here, not in `content`, so this must come before
+        // the empty-message fallback below (which would otherwise fabricate an
+        // empty assistant message and drop the model's actual intent).
+        for (_, acc) in std::mem::take(&mut tools) {
+            if acc.name.is_empty() {
+                continue;
+            }
+            tools_emitted = true;
+            let item_id = format!("fc_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+            let call_id = if acc.id.is_empty() {
+                format!("call_{}", &uuid::Uuid::new_v4().simple().to_string()[..12])
+            } else {
+                acc.id.clone()
+            };
+            let arguments = if acc.args.is_empty() {
+                "{}".to_string()
+            } else {
+                acc.args.clone()
+            };
+            let item = json!({
+                "id": item_id.clone(),
+                "type": "function_call",
+                "status": "completed",
+                "call_id": call_id.clone(),
+                "name": acc.name.clone(),
+                "arguments": arguments.clone(),
+            });
+            tool_items.push(item.clone());
+            send_event(
+                &tx,
+                json!({
+                    "type": "response.output_item.added",
+                    "output_index": msg_index,
+                    "item": {
+                        "id": item_id.clone(),
+                        "type": "function_call",
+                        "status": "in_progress",
+                        "call_id": call_id.clone(),
+                        "name": acc.name.clone(),
+                        "arguments": "",
+                    },
+                    "sequence_number": seq,
+                }),
+            )
+            .await;
+            seq += 1;
+            send_event(
+                &tx,
+                json!({
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": item_id.clone(),
+                    "output_index": msg_index,
+                    "delta": arguments.clone(),
+                    "sequence_number": seq,
+                }),
+            )
+            .await;
+            seq += 1;
+            send_event(
+                &tx,
+                json!({
+                    "type": "response.function_call_arguments.done",
+                    "item_id": item_id.clone(),
+                    "output_index": msg_index,
+                    "arguments": arguments.clone(),
+                    "sequence_number": seq,
+                }),
+            )
+            .await;
+            seq += 1;
+            send_event(
+                &tx,
+                json!({
+                    "type": "response.output_item.done",
+                    "output_index": msg_index,
+                    "item": item,
+                    "sequence_number": seq,
+                }),
+            )
+            .await;
+            seq += 1;
+            msg_index += 1;
         }
 
         if usage.is_null() {
@@ -1589,8 +1716,10 @@ async fn responses_stream_from_chat(
         }
         let _ = reasoning_closed;
         // OpenAI Responses always returns a message item; open an empty one if
-        // the upstream produced no visible content.
-        if !message_opened {
+        // the upstream produced no visible content. Skip it on a pure tool-use
+        // turn: the function_call items ARE the response (matching OpenAI's
+        // own behaviour), and a fabricated empty message would confuse clients.
+        if !message_opened && !tools_emitted {
             message_opened = true;
             msg_index = if reasoning_opened { 1 } else { 0 };
             send_event(
@@ -1618,45 +1747,54 @@ async fn responses_stream_from_chat(
             .await;
             seq += 1;
         }
-        let _ = message_opened;
-        send_event(
-            &tx,
-            json!({
-                "type": "response.output_text.done",
-                "item_id": msg_id,
-                "output_index": msg_index,
-                "content_index": 0,
-                "text": text,
-                "sequence_number": seq,
-            }),
-        )
-        .await;
-        seq += 1;
-        send_event(
-            &tx,
-            json!({
-                "type": "response.content_part.done",
-                "item_id": msg_id,
-                "output_index": msg_index,
-                "content_index": 0,
-                "part": {"type": "output_text", "text": text, "annotations": []},
-                "sequence_number": seq,
-            }),
-        )
-        .await;
-        seq += 1;
-        send_event(
-            &tx,
-            json!({
-                "type": "response.output_item.done",
-                "output_index": msg_index,
-                "item": {"id": msg_id, "type": "message", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "text": text, "annotations": []}]},
-                "sequence_number": seq,
-            }),
-        )
-        .await;
-        seq += 1;
-        let output = responses_final_output(&rs_id, &reasoning, &msg_id, &text);
+        // Close the message item — only when one was actually opened. On a
+        // pure tool-use turn the function_call items are the whole response.
+        if message_opened {
+            send_event(
+                &tx,
+                json!({
+                    "type": "response.output_text.done",
+                    "item_id": msg_id,
+                    "output_index": msg_index,
+                    "content_index": 0,
+                    "text": text,
+                    "sequence_number": seq,
+                }),
+            )
+            .await;
+            seq += 1;
+            send_event(
+                &tx,
+                json!({
+                    "type": "response.content_part.done",
+                    "item_id": msg_id,
+                    "output_index": msg_index,
+                    "content_index": 0,
+                    "part": {"type": "output_text", "text": text, "annotations": []},
+                    "sequence_number": seq,
+                }),
+            )
+            .await;
+            seq += 1;
+            send_event(
+                &tx,
+                json!({
+                    "type": "response.output_item.done",
+                    "output_index": msg_index,
+                    "item": {"id": msg_id, "type": "message", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "text": text, "annotations": []}]},
+                    "sequence_number": seq,
+                }),
+            )
+            .await;
+            seq += 1;
+        }
+        let mut output = responses_final_output(&rs_id, &reasoning, &msg_id, &text);
+        // A pure tool-use turn has no message item; drop the empty one the
+        // helper always appends, and surface the function_call items instead.
+        if tools_emitted {
+            output.retain(|item| item.get("type").and_then(|v| v.as_str()) != Some("message"));
+            output.extend(tool_items);
+        }
         send_event(
             &tx,
             response_event(
